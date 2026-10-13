@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://scholarship.portal.gov.in/ws"
+           xmlns:tns="http://scholarship.portal.gov.in/ws"
+           elementFormDefault="qualified">
+
+  <!-- ==================== COMMON TYPES ==================== -->
+  <xs:complexType name="ScholarshipType">
+    <xs:sequence>
+      <xs:element name="scholarship_id" type="xs:long"/>
+      <xs:element name="name" type="xs:string"/>
+      <xs:element name="description" type="xs:string" minOccurs="0"/>
+      <xs:element name="amount" type="xs:decimal"/>
+      <xs:element name="status" type="xs:string"/>
+      <xs:element name="deadline" type="xs:date" minOccurs="0"/>
+      <xs:element name="minimum_cgpa" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="maximum_income" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="eligible_course" type="xs:string" minOccurs="0"/>
+      <xs:element name="eligible_category" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="StudentType">
+    <xs:sequence>
+      <xs:element name="student_id" type="xs:long"/>
+      <xs:element name="name" type="xs:string"/>
+      <xs:element name="email" type="xs:string"/>
+      <xs:element name="phone" type="xs:string" minOccurs="0"/>
+      <xs:element name="gender" type="xs:string" minOccurs="0"/>
+      <xs:element name="category" type="xs:string" minOccurs="0"/>
+      <xs:element name="annual_income" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="cgpa" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="course" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ApplicationType">
+    <xs:sequence>
+      <xs:element name="application_id" type="xs:long"/>
+      <xs:element name="student_id" type="xs:long"/>
+      <xs:element name="scholarship_id" type="xs:long"/>
+      <xs:element name="status" type="xs:string"/>
+      <xs:element name="application_date" type="xs:date" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="DocumentType">
+    <xs:sequence>
+      <xs:element name="document_id" type="xs:long"/>
+      <xs:element name="application_id" type="xs:long"/>
+      <xs:element name="document_name" type="xs:string"/>
+      <xs:element name="verification_status" type="xs:string"/>
+      <xs:element name="uploaded_at" type="xs:dateTime" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- ==================== SCHOLARSHIP SERVICE MESSAGES ==================== -->
+  <xs:element name="GetScholarshipRequest">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="scholarship_id" type="xs:long"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="GetScholarshipResponse">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="scholarship" type="tns:ScholarshipType" minOccurs="0"/>
+        <xs:element name="status" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="ListScholarshipsRequest">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="status" type="xs:string" minOccurs="0"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="ListScholarshipsResponse">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="scholarships" type="tns:ScholarshipType" minOccurs="0" maxOccurs="unbounded"/>
+        <xs:element name="total" type="xs:int"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="CheckEligibilityRequest">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="student_id" type="xs:long"/>
+        <xs:element name="scholarship_id" type="xs:long"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="CheckEligibilityResponse">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="eligible" type="xs:boolean"/>
+        <xs:element name="message" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <!-- ==================== STUDENT SERVICE MESSAGES ==================== -->
+  <xs:element name="GetStudentRequest">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="student_id" type="xs:long"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="GetStudentResponse">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="student" type="tns:StudentType" minOccurs="0"/>
+        <xs:element name="status" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <!-- ==================== DOCUMENT SERVICE MESSAGES ==================== -->
+  <xs:element name="GetDocumentStatusRequest">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="document_id" type="xs:long"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="GetDocumentStatusResponse">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="document" type="tns:DocumentType" minOccurs="0"/>
+        <xs:element name="status" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
