@@ -17,6 +17,8 @@ import {
   FileText,
   AlertCircle,
   RefreshCw,
+  CheckSquare,
+  FileCheck,
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge';
 import {
@@ -26,6 +28,11 @@ import {
   createScholarship,
   checkSystemHealth,
   getScholarships,
+  getReviewByApplicationId,
+  createReviewRecord,
+  verifyReviewDocuments,
+  updateReviewEligibility,
+  submitReviewDecision,
 } from '../services/api';
 
 export default function AdminDashboard({ user }) {
@@ -44,6 +51,10 @@ export default function AdminDashboard({ user }) {
   const [selectedApp, setSelectedApp] = useState(null);
   const [actionRemarks, setActionRemarks] = useState('');
 
+  // Review Service state
+  const [currentReview, setCurrentReview] = useState(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+
   // Create Scholarship modal state
   const [isCreatingScholarship, setIsCreatingScholarship] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -59,6 +70,108 @@ export default function AdminDashboard({ user }) {
   useEffect(() => {
     loadAllData();
   }, [statusFilter]);
+
+  useEffect(() => {
+    if (selectedApp) {
+      loadReviewForApp(selectedApp);
+    } else {
+      setCurrentReview(null);
+    }
+  }, [selectedApp?.id, selectedApp?.raw_id]);
+
+  const loadReviewForApp = async (app) => {
+    setReviewLoading(true);
+    try {
+      const targetId = app.id || app.raw_id;
+      const rev = await getReviewByApplicationId(targetId);
+      setCurrentReview(rev);
+    } catch (e) {
+      console.warn('Could not load review:', e);
+      setCurrentReview(null);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const handleInitReview = async () => {
+    if (!selectedApp) return;
+    try {
+      setReviewLoading(true);
+      const rev = await createReviewRecord({
+        applicationId: String(selectedApp.id || selectedApp.raw_id),
+        studentId: String(selectedApp.student_id || selectedApp.student_uid || '1'),
+        scholarshipId: String(selectedApp.scholarship_id || '1'),
+        documents: [
+          { name: 'Identity Proof', status: 'PENDING', remarks: '' },
+          { name: 'Academic Marksheet', status: 'PENDING', remarks: '' },
+          { name: 'Income Certificate', status: 'PENDING', remarks: '' },
+        ],
+      });
+      setCurrentReview(rev);
+      alert('Review record successfully initialized in Review Service!');
+    } catch (err) {
+      alert('Error initializing review: ' + err.message);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const handleVerifyDoc = async (docName, newStatus) => {
+    if (!currentReview) return;
+    try {
+      setReviewLoading(true);
+      const updatedDocs = (currentReview.documents || []).map((d) =>
+        d.name === docName ? { ...d, status: newStatus } : d
+      );
+      const updated = await verifyReviewDocuments(currentReview.id, updatedDocs);
+      setCurrentReview(updated);
+      setSelectedApp((prev) => ({ ...prev, status: 'UNDER_REVIEW' }));
+      setApplications((prev) =>
+        prev.map((a) => (a.id === selectedApp.id ? { ...a, status: 'UNDER_REVIEW' } : a))
+      );
+    } catch (err) {
+      alert('Error updating document status: ' + err.message);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const handleToggleEligibility = async (eligible) => {
+    if (!currentReview) return;
+    try {
+      setReviewLoading(true);
+      const updated = await updateReviewEligibility(currentReview.id, eligible, actionRemarks || 'Eligibility verified by reviewer');
+      setCurrentReview(updated);
+    } catch (err) {
+      alert('Error updating eligibility: ' + err.message);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const handleReviewDecision = async (decision) => {
+    if (!currentReview) return;
+    try {
+      setReviewLoading(true);
+      const updated = await submitReviewDecision(
+        currentReview.id,
+        decision,
+        actionRemarks || `Decision marked as ${decision}`,
+        user?.name || 'Review Officer'
+      );
+      setCurrentReview(updated);
+      setSelectedApp((prev) => ({ ...prev, status: decision, remarks: actionRemarks || prev.remarks }));
+      setApplications((prev) =>
+        prev.map((a) => (a.id === selectedApp.id ? { ...a, status: decision, remarks: actionRemarks || a.remarks } : a))
+      );
+      setActionRemarks('');
+      alert(`Review decision recorded: ${decision}! Application Service has been updated.`);
+    } catch (err) {
+      alert('Review Decision Error: ' + err.message);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
 
   const loadAllData = async () => {
     setLoading(true);
@@ -376,6 +489,216 @@ export default function AdminDashboard({ user }) {
                     <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#06B6D4' }}>{selectedApp.documents_count || 3} Files</div>
                   </div>
                 </div>
+
+                {/* Review Service Scrutiny (Microservice Port 3004) */}
+                {(() => {
+                  const allDocsVerified = currentReview?.documents?.length > 0 &&
+                    currentReview.documents.every((d) => d.status === 'VERIFIED');
+                  const isEligible = currentReview?.eligible === true;
+                  const canApproveViaReviewService = allDocsVerified && isEligible;
+
+                  return (
+                    <div style={{
+                      background: 'rgba(30, 41, 59, 0.7)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '1.25rem',
+                      border: '1px solid rgba(99, 102, 241, 0.3)',
+                      marginBottom: '1.25rem',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <FileCheck size={18} color="#818CF8" />
+                          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#C7D2FE', textTransform: 'uppercase' }}>
+                            Review Service Scrutiny (Port 3004)
+                          </span>
+                        </div>
+                        {currentReview && (
+                          <span style={{
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            padding: '0.2rem 0.6rem',
+                            borderRadius: '9999px',
+                            background: currentReview.status === 'APPROVED' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.2)',
+                            color: currentReview.status === 'APPROVED' ? '#34D399' : '#A5B4FC',
+                            border: '1px solid rgba(99, 102, 241, 0.3)'
+                          }}>
+                            {currentReview.status}
+                          </span>
+                        )}
+                      </div>
+
+                      {reviewLoading ? (
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.5rem 0' }}>
+                          Communicating with Review Service...
+                        </div>
+                      ) : currentReview ? (
+                        <div>
+                          {/* Document Verification Checklist */}
+                          <div style={{ marginBottom: '1rem' }}>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.5rem', fontWeight: 600 }}>
+                              Document Verification
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                              {(currentReview.documents || []).map((doc, idx) => (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    background: 'rgba(15, 23, 42, 0.5)',
+                                    padding: '0.5rem 0.75rem',
+                                    borderRadius: 'var(--radius-sm)',
+                                    border: '1px solid var(--border-subtle)',
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <FileText size={15} color="var(--text-muted)" />
+                                    <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>{doc.name}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <span style={{
+                                      fontSize: '0.7rem',
+                                      padding: '0.15rem 0.45rem',
+                                      borderRadius: '4px',
+                                      fontWeight: 600,
+                                      background: doc.status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.15)' : doc.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                                      color: doc.status === 'VERIFIED' ? '#34D399' : doc.status === 'REJECTED' ? '#F87171' : '#FBBF24',
+                                    }}>
+                                      {doc.status}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerifyDoc(doc.name, 'VERIFIED')}
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', color: '#34D399' }}
+                                      title="Mark Verified"
+                                    >
+                                      ✓ Verify
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerifyDoc(doc.name, 'REJECTED')}
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', color: '#F87171' }}
+                                      title="Mark Rejected"
+                                    >
+                                      ✗ Reject
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Eligibility Verification Toggle */}
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            background: 'rgba(15, 23, 42, 0.5)',
+                            padding: '0.65rem 0.85rem',
+                            borderRadius: 'var(--radius-sm)',
+                            border: '1px solid var(--border-subtle)',
+                            marginBottom: '1rem',
+                          }}>
+                            <div>
+                              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                                Eligibility Scrutiny Check
+                              </div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                Status: {currentReview.eligible === true ? '✓ Verified Eligible' : currentReview.eligible === false ? '✗ Criteria Not Met' : '⏳ Pending Check'}
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.4rem' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleEligibility(true)}
+                                className="btn btn-secondary btn-sm"
+                                style={{
+                                  fontSize: '0.75rem',
+                                  padding: '0.3rem 0.6rem',
+                                  borderColor: currentReview.eligible === true ? '#10B981' : undefined,
+                                  background: currentReview.eligible === true ? 'rgba(16, 185, 129, 0.2)' : undefined,
+                                  color: currentReview.eligible === true ? '#34D399' : undefined,
+                                }}
+                              >
+                                Mark Eligible
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleEligibility(false)}
+                                className="btn btn-secondary btn-sm"
+                                style={{
+                                  fontSize: '0.75rem',
+                                  padding: '0.3rem 0.6rem',
+                                  borderColor: currentReview.eligible === false ? '#EF4444' : undefined,
+                                  background: currentReview.eligible === false ? 'rgba(239, 68, 68, 0.2)' : undefined,
+                                  color: currentReview.eligible === false ? '#F87171' : undefined,
+                                }}
+                              >
+                                Ineligible
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Review Service Decision Buttons */}
+                          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleReviewDecision('APPROVED')}
+                              disabled={!canApproveViaReviewService}
+                              className="btn btn-success btn-sm"
+                              style={{
+                                flex: 1,
+                                opacity: canApproveViaReviewService ? 1 : 0.5,
+                                cursor: canApproveViaReviewService ? 'pointer' : 'not-allowed',
+                              }}
+                              title={canApproveViaReviewService ? 'Approve application through Review Service' : 'Requires all documents VERIFIED and Eligibility confirmed'}
+                            >
+                              <CheckCircle size={14} /> Reviewer Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleReviewDecision('CORRECTION_REQUIRED')}
+                              className="btn btn-secondary btn-sm"
+                              style={{ flex: 1, color: '#FBBF24' }}
+                            >
+                              Request Correction
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleReviewDecision('REJECTED')}
+                              className="btn btn-danger btn-sm"
+                              style={{ flex: 1 }}
+                            >
+                              <XCircle size={14} /> Reviewer Reject
+                            </button>
+                          </div>
+                          {!canApproveViaReviewService && (
+                            <div style={{ fontSize: '0.7rem', color: '#FBBF24', marginTop: '0.35rem' }}>
+                              * To approve grant via Review Service, all documents must be VERIFIED and eligibility must be marked true.
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                            No scrutiny record found on Review Service for this application.
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleInitReview}
+                            className="btn btn-secondary btn-sm"
+                            style={{ fontSize: '0.75rem' }}
+                          >
+                            Initialize Review Record
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Audit remarks */}
                 <div style={{ marginBottom: '1.25rem' }}>

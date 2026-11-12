@@ -1,55 +1,79 @@
 const { Pool } = require('pg');
-const config = require('./index');
+const { MongoClient } = require('mongodb');
+const env = require('./env');
 
-const pool = new Pool({
-  host: config.pg.host,
-  port: config.pg.port,
-  database: config.pg.database,
-  user: config.pg.user,
-  password: config.pg.password,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-});
+// 1. PostgreSQL Connection Pool
+const poolConfig = env.postgres.connectionString
+  ? { connectionString: env.postgres.connectionString }
+  : {
+      host: env.postgres.host,
+      port: env.postgres.port,
+      database: env.postgres.database,
+      user: env.postgres.user,
+      password: env.postgres.password,
+      max: env.postgres.max,
+      idleTimeoutMillis: env.postgres.idleTimeoutMillis,
+      connectionTimeoutMillis: env.postgres.connectionTimeoutMillis,
+    };
 
-pool.on('connect', (client) => {
-  client.query(`SET search_path TO ${config.pg.schema}, public, portal`);
-});
+const pool = new Pool(poolConfig);
 
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle PostgreSQL client:', err);
+  console.error('Unexpected error on idle PostgreSQL client:', err.message);
 });
 
 async function query(text, params) {
   const start = Date.now();
   const res = await pool.query(text, params);
-  const duration = Date.now() - start;
-  if (config.nodeEnv === 'development' && process.env.DEBUG_SQL === 'true') {
-    console.log(`[SQL] executed query: ${text.slice(0, 100)} (${duration}ms)`);
-  }
   return res;
 }
 
-async function testConnection() {
+async function getClient() {
+  const client = await pool.connect();
+  return client;
+}
+
+// 2. MongoDB Native Client (for application snapshots and document metadata)
+let mongoClient = null;
+let mongoDb = null;
+
+async function connectMongo() {
+  if (mongoDb) return mongoDb;
   try {
-    const res = await query('SELECT NOW() as now, current_database() as db');
-    return {
-      connected: true,
-      time: res.rows[0].now,
-      database: res.rows[0].db,
-    };
+    mongoClient = new MongoClient(env.mongodb.uri, {
+      serverSelectionTimeoutMS: 3000,
+      connectTimeoutMS: 3000,
+    });
+    await mongoClient.connect();
+    mongoDb = mongoClient.db(env.mongodb.database);
+    console.log(`✓ Connected to MongoDB database: ${env.mongodb.database}`);
+    return mongoDb;
   } catch (err) {
-    return {
-      connected: false,
-      error: err.message,
-    };
+    console.warn(`⚠️ MongoDB connection warning (Service will operate with PostgreSQL primary): ${err.message}`);
+    return null;
+  }
+}
+
+function getMongoDb() {
+  return mongoDb;
+}
+
+async function closeConnections() {
+  try {
+    await pool.end();
+  } catch (e) {}
+  if (mongoClient) {
+    try {
+      await mongoClient.close();
+    } catch (e) {}
   }
 }
 
 module.exports = {
   pool,
   query,
-  getClient: () => pool.connect(),
-  testConnection,
+  getClient,
+  connectMongo,
+  getMongoDb,
+  closeConnections,
 };
-

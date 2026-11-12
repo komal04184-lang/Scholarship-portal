@@ -32,3 +32,9 @@ coverage/
 
 # Misc
 *.tgz
+
+# Scholarship backend uploaded documents
+scholarship-portal-backend/uploads/
+
+# Empty root npm lock file
+/package-lock.json
