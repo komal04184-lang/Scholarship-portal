@@ -1,0 +1,77 @@
+{
+  "info": {
+    "name": "Scholarship Service API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5002" },
+    { "key": "token", "value": "PASTE_ADMIN_JWT_HERE" },
+    { "key": "scholarshipId", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": { "method": "GET", "url": "{{baseUrl}}/health" }
+    },
+    {
+      "name": "Get All Scholarships",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/scholarships" }
+    },
+    {
+      "name": "Filter Scholarships",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/scholarships?category=Merit&department=Computer%20Science&page=1&limit=10" }
+    },
+    {
+      "name": "Get Scholarship By ID",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/scholarships/{{scholarshipId}}" }
+    },
+    {
+      "name": "Create Scholarship (Admin)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Women in Technology Scholarship\",\n  \"description\": \"Scholarship for eligible technology students.\",\n  \"category\": \"STEM\",\n  \"amount\": 40000,\n  \"min_cgpa\": 7.5,\n  \"max_income\": 600000,\n  \"department\": \"Computer Science\",\n  \"deadline\": \"2027-05-30\",\n  \"total_slots\": 25,\n  \"eligibility_criteria\": [\"Currently enrolled student\", \"Minimum CGPA 7.5\"],\n  \"required_documents\": [\"Latest marksheet\", \"College ID\", \"Income certificate\"]\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/scholarships/admin"
+      }
+    },
+    {
+      "name": "Update Scholarship (Admin)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "body": { "mode": "raw", "raw": "{ \"amount\": 45000, \"description\": \"Updated scholarship details.\" }" },
+        "url": "{{baseUrl}}/api/v1/scholarships/admin/{{scholarshipId}}"
+      }
+    },
+    {
+      "name": "Close Scholarship (Admin)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}"
+          }
+        ],
+        "body": { "mode": "raw", "raw": "{ \"status\": \"closed\" }" },
+        "url": "{{baseUrl}}/api/v1/scholarships/admin/{{scholarshipId}}/status"
+      }
+    },
+    {
+      "name": "Delete Scholarship (Admin)",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": "{{baseUrl}}/api/v1/scholarships/admin/{{scholarshipId}}"
+      }
+    }
+  ]
+}
