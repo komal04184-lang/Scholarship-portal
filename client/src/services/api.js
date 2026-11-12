@@ -459,37 +459,49 @@ export async function updateStudentProfile(profileData) {
 
 export async function getStudentApplications() {
   try {
-    const res = await request('/applications');
-    const apps = res.applications || [];
+    const res = await request('/applications/my').catch(() => request('/applications'));
+    const apps = res.data?.applications || res.applications || (Array.isArray(res.data) ? res.data : []);
 
-    return apps.map((a) => ({
-      application_id: `APP-2026-00${a.application_id}`,
-      raw_id: a.application_id,
-      scholarship_id: a.scholarship_id,
-      scholarship_title: a.scholarship_name || 'Scholarship Scheme',
-      category: a.category || 'Merit',
-      award_amount: parseFloat(a.scholarship_amount) || 50000,
-      status: a.status || 'SUBMITTED',
-      submitted_at: a.submitted_at || a.created_at || new Date().toISOString(),
-      sop: 'Application submitted through online student portal with academic transcripts.',
-      reviewer_name: a.reviewer_name || null,
-      documents: [
-        { name: 'Academic_Transcript.pdf', size: '1.2 MB', verified: a.status === 'APPROVED' },
-        { name: 'Income_Certificate.pdf', size: '850 KB', verified: a.status === 'APPROVED' },
-      ],
-      review_timeline: [
-        { status: 'SUBMITTED', title: 'Application Submitted', date: new Date(a.submitted_at || Date.now()).toLocaleDateString(), note: 'Submitted via ApexScholar portal.' },
-        ...(a.status === 'UNDER_REVIEW' || a.status === 'APPROVED' || a.status === 'REJECTED'
-          ? [{ status: 'UNDER_REVIEW', title: 'Review in Progress', date: 'In Review', note: a.reviewer_name ? `Assigned to ${a.reviewer_name}` : 'Scrutiny committee assigned.' }]
-          : []),
-        ...(a.status === 'APPROVED'
-          ? [{ status: 'APPROVED', title: 'Grant Approved', date: new Date(a.updated_at || Date.now()).toLocaleDateString(), note: 'Eligible award sanctioned for disbursement.' }]
-          : []),
-        ...(a.status === 'REJECTED'
-          ? [{ status: 'REJECTED', title: 'Application Rejected', date: new Date(a.updated_at || Date.now()).toLocaleDateString(), note: 'Eligibility criteria not met.' }]
-          : []),
-      ],
-    }));
+    return apps.map((a) => {
+      const appId = a.application_number || (a.application_id ? `APP-2026-00${a.application_id}` : 'APP-2026-001');
+      const rawId = a.application_id || a.id;
+      const status = a.status || 'SUBMITTED';
+
+      return {
+        application_id: appId,
+        raw_id: rawId,
+        scholarship_id: a.scholarship_id,
+        scholarship_title: a.scholarship_name || a.scholarship?.name || a.scholarship_title || 'Scholarship Scheme',
+        category: a.category || a.scholarship?.category || 'Merit',
+        award_amount: parseFloat(a.amount || a.scholarship_amount || a.scholarship?.amount) || 50000,
+        status,
+        submitted_at: a.submitted_at || a.created_at || new Date().toISOString(),
+        sop: a.sop || a.statement || 'Application submitted through online student portal with academic transcripts.',
+        reviewer_name: a.reviewer_name || null,
+        documents: a.documents || [
+          { name: 'Academic_Transcript.pdf', size: '1.2 MB', verified: status === 'APPROVED' },
+          { name: 'Income_Certificate.pdf', size: '850 KB', verified: status === 'APPROVED' },
+        ],
+        review_timeline: a.timeline || [
+          { status: 'SUBMITTED', title: 'Application Submitted', date: new Date(a.submitted_at || Date.now()).toLocaleDateString(), note: 'Submitted via ApexScholar portal.' },
+          ...(status === 'UNDER_REVIEW' || status === 'APPROVED' || status === 'REJECTED' || status === 'CORRECTION_REQUIRED'
+            ? [{ status: 'UNDER_REVIEW', title: 'Review in Progress', date: 'In Review', note: a.reviewer_name ? `Assigned to ${a.reviewer_name}` : 'Scrutiny committee assigned.' }]
+            : []),
+          ...(status === 'CORRECTION_REQUIRED'
+            ? [{ status: 'CORRECTION_REQUIRED', title: 'Correction Requested', date: new Date(a.updated_at || Date.now()).toLocaleDateString(), note: 'Applicant requested to update documentation.' }]
+            : []),
+          ...(status === 'APPROVED'
+            ? [{ status: 'APPROVED', title: 'Grant Approved', date: new Date(a.updated_at || Date.now()).toLocaleDateString(), note: 'Eligible award sanctioned for disbursement.' }]
+            : []),
+          ...(status === 'REJECTED'
+            ? [{ status: 'REJECTED', title: 'Application Rejected', date: new Date(a.updated_at || Date.now()).toLocaleDateString(), note: 'Eligibility criteria not met.' }]
+            : []),
+          ...(status === 'DISBURSED'
+            ? [{ status: 'DISBURSED', title: 'Grant Disbursed', date: new Date(a.updated_at || Date.now()).toLocaleDateString(), note: 'Funds successfully transferred.' }]
+            : []),
+        ],
+      };
+    });
   } catch (err) {
     console.warn('getStudentApplications fallback:', err.message);
     return [];
@@ -502,20 +514,24 @@ export async function submitApplication(appData, files = []) {
       method: 'POST',
       body: JSON.stringify({
         scholarship_id: parseInt(appData.scholarship_id, 10),
-        statement: appData.sop || 'Applied via student portal',
+        statement: appData.sop || appData.statement || 'Applied via student portal',
+        sop: appData.sop || appData.statement || 'Applied via student portal',
+        academic_year: appData.academic_year || '2026-2027',
       }),
     });
 
-    const newApp = res.application;
+    const newApp = res.data?.application || res.application;
 
     // Upload files if any
-    if (files.length > 0 && newApp?.application_id) {
+    if (files.length > 0 && (newApp?.application_id || newApp?.id)) {
+      const targetId = newApp.application_id || newApp.id;
       for (const file of files) {
         try {
           const fd = new FormData();
           fd.append('document', file);
           fd.append('requirement_id', 1);
-          await request(`/applications/${newApp.application_id}/documents`, {
+          fd.append('document_type', file.name.split('.')[0] || 'Marksheet');
+          await request(`/applications/${targetId}/documents`, {
             method: 'POST',
             body: fd,
           });
@@ -533,12 +549,12 @@ export async function submitApplication(appData, files = []) {
 }
 
 // ----------------------------------------------------
-// Admin APIs
+// Admin & Review APIs
 // ----------------------------------------------------
 export async function getAdminMetrics() {
   try {
-    const res = await request('/admin/dashboard');
-    const s = res.stats || {};
+    const res = await request('/admin/dashboard').catch(() => null);
+    const s = res?.stats || {};
     return {
       total_applications: parseInt(s.total_applications || 0, 10),
       pending_review: parseInt(s.pending_applications || 0, 10),
@@ -567,24 +583,36 @@ export async function getAdminMetrics() {
 export async function getAdminApplications(statusFilter = 'ALL') {
   try {
     const query = statusFilter !== 'ALL' ? `?status=${statusFilter}&limit=50` : '?limit=50';
-    const res = await request(`/admin/applications${query}`);
-    const apps = res.applications || [];
+    
+    // First try the Application Service endpoint: /api/v1/applications/admin/all
+    let rawApps = [];
+    try {
+      const res = await request(`/applications/admin/all${query}`);
+      rawApps = res.data?.applications || res.applications || [];
+    } catch {
+      // Fallback to monolith /api/v1/admin/applications
+      const res = await request(`/admin/applications${query}`);
+      rawApps = res.applications || res.data?.applications || [];
+    }
 
-    return apps.map((a) => ({
-      id: String(a.application_id),
-      raw_id: a.application_id,
-      applicant_name: a.student_name || 'Applicant',
+    return rawApps.map((a) => ({
+      id: String(a.application_id || a.id),
+      raw_id: a.application_id || a.id,
+      application_number: a.application_number || `APP-2026-00${a.application_id || a.id}`,
+      applicant_name: a.student_name || (a.student_id ? `Student #${a.student_id}` : 'Applicant'),
       email: a.student_email || '',
-      student_uid: `STU-2025-0${a.student_id}`,
+      student_uid: a.student_id ? `STU-2025-0${a.student_id}` : 'STU-2025-01',
+      student_id: a.student_id,
+      scholarship_id: a.scholarship_id,
       cgpa: a.cgpa || 8.5,
       income: a.annual_income || 350000,
-      scholarship_title: a.scholarship_name || 'Scholarship Scheme',
+      scholarship_title: a.scholarship_name || a.scholarship_title || 'Scholarship Scheme',
       category: a.category || 'Merit',
-      amount: parseFloat(a.scholarship_amount) || 50000,
-      status: a.status,
+      amount: parseFloat(a.scholarship_amount || a.amount) || 50000,
+      status: a.status || 'SUBMITTED',
       submitted_date: a.submitted_at ? new Date(a.submitted_at).toLocaleDateString() : 'Recent',
-      documents_count: parseInt(a.doc_count || 2, 10),
-      remarks: a.reviewer_name ? `Reviewed by ${a.reviewer_name}` : 'Awaiting reviewer remarks',
+      documents_count: parseInt(a.document_count || a.doc_count || 3, 10),
+      remarks: a.reviewer_name ? `Reviewed by ${a.reviewer_name}` : (a.remarks || 'Awaiting reviewer remarks'),
     }));
   } catch (err) {
     console.warn('getAdminApplications fallback:', err.message);
@@ -594,17 +622,115 @@ export async function getAdminApplications(statusFilter = 'ALL') {
 
 export async function updateApplicationStatus(appId, newStatus, remarks = '') {
   try {
-    return await request(`/admin/applications/${appId}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        status: newStatus,
-        comment: remarks || `Status changed to ${newStatus}`,
-      }),
-    });
+    // Attempt updating via Application Service first
+    try {
+      return await request(`/applications/${appId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: newStatus,
+          remarks: remarks || `Status changed to ${newStatus}`,
+          comment: remarks || `Status changed to ${newStatus}`,
+        }),
+      });
+    } catch {
+      // Fallback to monolith endpoint
+      return await request(`/admin/applications/${appId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: newStatus,
+          comment: remarks || `Status changed to ${newStatus}`,
+        }),
+      });
+    }
   } catch (err) {
     console.warn('updateApplicationStatus error:', err.message);
     throw err;
   }
+}
+
+// ----------------------------------------------------
+// Review Service APIs (Port 3004)
+// ----------------------------------------------------
+
+export async function getReviewByApplicationId(applicationId) {
+  try {
+    const token = getStoredToken();
+    const res = await fetch(`/api/reviews/application/${encodeURIComponent(applicationId)}`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.data || null;
+  } catch (err) {
+    console.warn('getReviewByApplicationId error:', err.message);
+    return null;
+  }
+}
+
+export async function createReviewRecord(data) {
+  try {
+    const token = getStoredToken();
+    const res = await fetch('/api/reviews', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json();
+    return json.data || null;
+  } catch (err) {
+    console.warn('createReviewRecord error:', err.message);
+    return null;
+  }
+}
+
+export async function verifyReviewDocuments(reviewId, documents) {
+  const token = getStoredToken();
+  const res = await fetch(`/api/reviews/${reviewId}/documents`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ documents }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.message || 'Failed to verify documents');
+  return json.data;
+}
+
+export async function updateReviewEligibility(reviewId, eligible, remarks = '') {
+  const token = getStoredToken();
+  const res = await fetch(`/api/reviews/${reviewId}/eligibility`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ eligible, remarks }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.message || 'Failed to update eligibility');
+  return json.data;
+}
+
+export async function submitReviewDecision(reviewId, decision, remarks = '', reviewedBy = '') {
+  const token = getStoredToken();
+  const res = await fetch(`/api/reviews/${reviewId}/decision`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ decision, remarks, reviewedBy }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.message || 'Failed to submit decision');
+  return json.data;
 }
 
 export async function createScholarship(scholarshipData) {
