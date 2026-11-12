@@ -1,0 +1,174 @@
+openapi: 3.0.3
+info:
+  title: ApexScholar Application Microservice API
+  description: Autonomous microservice managing scholarship applications, document attachments, lifecycle transitions, and progress tracking.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3003
+    description: Local Microservice Instance
+paths:
+  /health:
+    get:
+      summary: Service Health Check
+      responses:
+        '200':
+          description: Service and database connectivity healthy
+  /api/v1/applications:
+    post:
+      summary: Submit a new scholarship application
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - scholarship_id
+              properties:
+                scholarship_id:
+                  type: integer
+                  example: 2
+                statement:
+                  type: string
+                  example: "Personal statement detailing academic merit."
+                academic_year:
+                  type: string
+                  example: "2026-2027"
+      responses:
+        '201':
+          description: Application successfully submitted
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+        '409':
+          description: Duplicate application for this scholarship
+    get:
+      summary: Get student applications or admin filtered list
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Application list
+  /api/v1/applications/my:
+    get:
+      summary: Get logged-in student's applications
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of applications owned by student
+  /api/v1/applications/{id}:
+    get:
+      summary: Get application details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Application details with documents and status history
+        '403':
+          description: Forbidden (Student cannot view other student's application)
+        '404':
+          description: Application not found
+    patch:
+      summary: Update permitted fields of an application
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                statement:
+                  type: string
+      responses:
+        '200':
+          description: Application updated
+  /api/v1/applications/{id}/track:
+    get:
+      summary: Track application progress and timeline
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Progress percentage, status, and timeline
+  /api/v1/applications/{id}/status:
+    patch:
+      summary: Update application status (Admin/Reviewer)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [DRAFT, SUBMITTED, UNDER_REVIEW, DOCUMENTS_REQUIRED, RESUBMISSION_REQUIRED, CORRECTION_REQUIRED, APPROVED, REJECTED, PAYMENT_PENDING, COMPLETED, DISBURSED, WITHDRAWN]
+                comment:
+                  type: string
+      responses:
+        '200':
+          description: Status updated
+        '400':
+          description: Invalid status transition
+  /api/v1/applications/{id}/documents:
+    post:
+      summary: Upload document attachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - document
+              properties:
+                document:
+                  type: string
+                  format: binary
+                document_name:
+                  type: string
+      responses:
+        '201':
+          description: Document uploaded
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+

@@ -26,11 +26,17 @@ async function runMigrations() {
     const schema = process.env.PG_SCHEMA || 'public';
     await client.query(`SET search_path TO ${schema}, public, portal`);
 
-    const sqlPath = path.join(__dirname, '001_create_application_service_schema.sql');
-    const sql = fs.readFileSync(sqlPath, 'utf8');
+    const sqlFiles = fs.readdirSync(__dirname)
+      .filter((file) => file.endsWith('.sql'))
+      .sort();
 
-    await client.query(sql);
-    console.log('✓ PostgreSQL schema migration executed successfully.');
+    for (const sqlFile of sqlFiles) {
+      console.log(`Applying migration: ${sqlFile}...`);
+      const sqlPath = path.join(__dirname, sqlFile);
+      const sql = fs.readFileSync(sqlPath, 'utf8');
+      await client.query(sql);
+      console.log(`✓ Executed ${sqlFile}`);
+    }
 
     // Count existing applications to verify preservation
     const res = await client.query('SELECT COUNT(*) FROM application');
