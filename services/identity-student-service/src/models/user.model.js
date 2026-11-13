@@ -63,17 +63,45 @@ const userSchema = new mongoose.Schema({
     },
 
     // Academic details
-    academic_details: {
-        institution_name: String,
-        course: String,
-        branch: String,
-        academic_year: String,
-        marks_percentage: {
-            type: Number,
-            min: 0,
-            max: 100
-        }
+   academic_details: {
+    student_uid: {
+        type: String,
+        unique: true,
+        sparse: true
     },
+
+    institution_name: String,
+
+    department: String,
+
+    major: String,
+
+    course: String,
+
+    branch: String,
+
+    degree_level: String,
+
+    current_year: Number,
+
+    semester: Number,
+
+    cgpa: {
+        type: Number,
+        min: 0,
+        max: 10
+    },
+
+    passing_year: Number,
+
+    academic_year: String,
+
+    marks_percentage: {
+        type: Number,
+        min: 0,
+        max: 100
+    }
+},
 
     role: {
         type: String,

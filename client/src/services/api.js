@@ -225,33 +225,41 @@ export function clearStoredAuth() {
   localStorage.removeItem(USER_KEY);
 }
 
-// Fetch wrapper with auth header
+
+// Fetch wrapper with cookie-based authentication
 async function request(endpoint, options = {}) {
-  const token = getStoredToken();
   const headers = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers,
   };
 
+  // JSON requests ke liye Content-Type
+  if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  // FormData ke liye browser khud Content-Type set karega
   if (options.body instanceof FormData) {
     delete headers['Content-Type'];
   }
 
   const res = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
+    credentials: 'include',
     headers,
   });
 
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    const message = data.error || data.message || `Request failed (${res.status})`;
+    const message =
+      data.error || data.message || `Request failed (${res.status})`;
+
     throw new Error(message);
   }
 
   return data;
 }
+
 
 // ----------------------------------------------------
 // Public & Scholarship APIs
@@ -300,45 +308,53 @@ export async function getScholarshipById(id) {
 // Authentication APIs
 // ----------------------------------------------------
 export async function loginApi(email, password, targetRole = 'student') {
-  // If targetRole is 'admin' or 'officer' or 'reviewer', use admin login endpoint
-  const isAdminRole = targetRole === 'admin' || targetRole === 'officer' || targetRole === 'reviewer';
-  const endpoint = isAdminRole ? '/auth/admin/login' : '/auth/login';
-
-  const res = await request(endpoint, {
+  const res = await request('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email: email.trim(), password: password.trim() }),
+    body: JSON.stringify({
+      email: email.trim(),
+      password: password.trim(),
+    }),
   });
 
   const normalizedUser = {
     ...res.user,
-    role: (res.user.role || (isAdminRole ? 'admin' : 'student')).toLowerCase(),
+    role: (res.user.role || 'student').toLowerCase(),
   };
 
-  setStoredAuth(res.token, normalizedUser);
-  return { token: res.token, user: normalizedUser };
-}
+  // User details localStorage mein save hongi.
+  // JWT token backend HTTP-only cookie mein manage karega.
+  setStoredAuth(null, normalizedUser);
 
+  return {
+    token: null,
+    user: normalizedUser,
+  };
+}
 export async function registerApi(userData) {
   const payload = {
-    name: userData.name,
+    username: userData.username || userData.name,
     email: userData.email,
-    phone: userData.phone || null,
     password: userData.password,
-    confirmPassword: userData.confirmPassword || userData.password,
-    date_of_birth: userData.date_of_birth || null,
-    gender: userData.gender || null,
+    phone: userData.phone,
+    date_of_birth: userData.date_of_birth,
+    gender: userData.gender,
     address: userData.address || null,
     category: userData.category || null,
-    annual_income: userData.annual_income || null,
-    family_size: userData.family_size || null,
+
+    family_income:
+      userData.family_income ?? userData.annual_income ?? null,
+
     state: userData.state || null,
     city: userData.city || null,
-    institution_name: userData.institution_name || null,
-    course: userData.course || null,
-    branch: userData.branch || null,
-    semester: userData.semester || null,
-    cgpa: userData.cgpa || null,
-    passing_year: userData.passing_year || null,
+
+    academic_details: {
+      institution_name: userData.institution_name || null,
+      course: userData.course || null,
+      branch: userData.branch || null,
+      semester: userData.semester || null,
+      cgpa: userData.cgpa || null,
+      passing_year: userData.passing_year || null,
+    },
   };
 
   const res = await request('/auth/register', {
@@ -348,27 +364,36 @@ export async function registerApi(userData) {
 
   const normalizedUser = {
     ...res.user,
-    role: 'student',
+    role: (res.user.role || 'student').toLowerCase(),
   };
 
-  setStoredAuth(res.token, normalizedUser);
-  return { token: res.token, user: normalizedUser };
+  setStoredAuth(null, normalizedUser);
+
+  return {
+    token: null,
+    user: normalizedUser,
+  };
 }
 
 export async function getCurrentUser() {
   try {
-    const res = await request('/auth/me');
+    const res = await request('/profile/me');
+
     if (res.user) {
-      const normalized = {
+      const normalizedUser = {
         ...res.user,
         role: (res.user.role || 'student').toLowerCase(),
       };
-      setStoredAuth(getStoredToken(), normalized);
-      return normalized;
+
+      setStoredAuth(null, normalizedUser);
+
+      return normalizedUser;
     }
+
     return null;
   } catch (err) {
-    return getStoredUser();
+    clearStoredAuth();
+    return null;
   }
 }
 
@@ -427,32 +452,45 @@ export async function getStudentProfile() {
   }
 }
 
+
 export async function updateStudentProfile(profileData) {
   try {
-    const res = await request('/student/profile', {
-      method: 'PUT',
-      body: JSON.stringify({
-        name: profileData.name,
-        phone: profileData.phone,
-        address: profileData.address,
-        gender: profileData.gender,
-        date_of_birth: profileData.date_of_birth,
-        annual_income: profileData.family_annual_income || profileData.annual_income,
-        category: profileData.category,
-        family_size: profileData.family_size,
-        state: profileData.state,
-        city: profileData.city,
+    const payload = {
+      name: profileData.name,
+      phone: profileData.phone,
+      address: profileData.address,
+      gender: profileData.gender,
+      date_of_birth: profileData.date_of_birth,
+
+      family_annual_income:
+        profileData.family_annual_income ?? profileData.annual_income,
+
+      category: profileData.category,
+      state: profileData.state,
+      city: profileData.city,
+
+      academics: {
+        student_uid: profileData.student_uid,
+        department: profileData.department,
+        major: profileData.major,
+        degree_level: profileData.degree_level,
+        current_year: profileData.current_year,
         cgpa: profileData.cgpa,
         institution_name: profileData.institution_name,
         course: profileData.course,
         branch: profileData.branch,
         semester: profileData.semester,
         passing_year: profileData.passing_year,
-      }),
+      },
+    };
+
+    return await request('/profile/me', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     });
-    return res;
+
   } catch (err) {
-    console.warn('updateStudentProfile error:', err.message);
+    console.error('updateStudentProfile error:', err.message);
     throw err;
   }
 }
