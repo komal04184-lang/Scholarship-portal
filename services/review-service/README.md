@@ -1,103 +1,113 @@
-# Scholarship Review Service
+# ApexScholar – Review Microservice
 
-An independent Node.js + Express microservice for reviewing scholarship applications.
+Node.js 18+ / Express service for reviewer workflows. The service owns review records and review history; it does not read another microservice's database.
 
-## Features
-- Create and list reviews
-- View a review by ID or application ID
-- Verify submitted documents
-- Record eligibility review
-- Approve, reject, or request corrections
-- Health endpoint
-- In-memory demo mode (default) and optional PostgreSQL persistence
+## Configuration
 
-## 1. Run without installing a database
-Requirements: Node.js 18+
+Copy `.env.example` to `.env` and set:
 
-```bash
+- `PORT=3004` (standardized with the ApexScholar architecture)
+- `DATABASE_URL` for the Review PostgreSQL database
+- `JWT_SECRET` to the same HS256 signing secret used by Identity Service
+- `INTERNAL_SERVICE_TOKEN` to the same shared token configured in Application Service
+- `APPLICATION_SERVICE_URL=http://localhost:3003`
+
+For the integrated project, use PostgreSQL (`DB_AUTO_INIT=true` for local schema initialization). In-memory mode is intended only for isolated local tests/demo and resets on restart.
+
+### Windows PowerShell
+
+```powershell
+Copy-Item .env.example .env
 npm install
-cp .env.example .env
+npm test
 npm run dev
 ```
 
-On Windows PowerShell, if `cp` does not work:
-```powershell
-Copy-Item .env.example .env
+Service URL: `http://localhost:3004`; health: `GET /api/health`.
+
+## Authentication and trust boundaries
+
+- `POST /api/reviews` is an internal endpoint. It requires `x-service-token: <INTERNAL_SERVICE_TOKEN>` and may be called by Application Service after all application documents have been uploaded.
+- Reviewer endpoints require `Authorization: Bearer <JWT>`. JWT must use HS256 and be signed with `JWT_SECRET`. The token must contain a user ID (`id`, `userId`, `user.id`, or `sub`) and `role` (or `user.role`) of `reviewer` or `admin`.
+- The reviewer identity is taken from the verified token; clients cannot choose `reviewedBy` in the request body.
+
+## API
+
+| Method | Endpoint | Access | Purpose |
+|---|---|---|---|
+| GET | `/api/health` | Public | Health check |
+| POST | `/api/reviews` | Internal service token | Create review |
+| GET | `/api/reviews` | Reviewer/Admin | List reviews; optional `?status=` |
+| GET | `/api/reviews/:id` | Reviewer/Admin | Get review |
+| GET | `/api/reviews/application/:applicationId` | Reviewer/Admin | Get review for application |
+| GET | `/api/reviews/:id/history` | Reviewer/Admin | Audit history |
+| PATCH | `/api/reviews/:id/documents` | Reviewer/Admin | Verify/update document records |
+| PATCH | `/api/reviews/:id/eligibility` | Reviewer/Admin | Record eligibility result |
+| PATCH | `/api/reviews/:id/decision` | Reviewer/Admin | Approve, reject, or request correction |
+
+### Create review (Application Service → Review Service)
+
+```http
+POST /api/reviews
+x-service-token: <INTERNAL_SERVICE_TOKEN>
+x-caller-service: application-service
+Content-Type: application/json
 ```
 
-The service starts at `http://localhost:5004`. In-memory data resets when the server restarts.
-
-## 2. Optional PostgreSQL setup
-Create a PostgreSQL database, for example `scholarship_review`, then set `DATABASE_URL` in `.env`:
-
-```env
-DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/scholarship_review
-DB_AUTO_INIT=true
-```
-
-Restart the server. The SQL schema is in `sql/schema.sql`. If you prefer to run it manually, execute that file in your database and keep `DB_AUTO_INIT=false`.
-
-## API endpoints
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/api/health` | Health check |
-| POST | `/api/reviews` | Create a review for an application |
-| GET | `/api/reviews` | List reviews (optional `?status=PENDING`) |
-| GET | `/api/reviews/:id` | Get review by review ID |
-| GET | `/api/reviews/application/:applicationId` | Get review for an application |
-| PATCH | `/api/reviews/:id/documents` | Update document verification |
-| PATCH | `/api/reviews/:id/eligibility` | Record eligibility check |
-| PATCH | `/api/reviews/:id/decision` | Approve, reject, or request correction |
-
-## Example requests
-
-### Create review
-`POST http://localhost:5004/api/reviews`
 ```json
 {
   "applicationId": "APP101",
   "studentId": "STU101",
   "scholarshipId": "SCH101",
   "documents": [
-    { "name": "Income Certificate", "status": "PENDING" },
-    { "name": "Marks Card", "status": "PENDING" }
+    { "documentId": "DOC-1", "name": "Income Certificate", "status": "PENDING" },
+    { "documentId": "DOC-2", "name": "Marks Card", "status": "PENDING" }
   ]
 }
 ```
 
+Pass the actual uploaded document identifiers/metadata from Application Service, not placeholder documents. Document file storage remains owned by Application Service.
+
 ### Verify documents
-`PATCH http://localhost:5004/api/reviews/REVIEW_ID/documents`
+
 ```json
 {
   "documents": [
-    { "name": "Income Certificate", "status": "VERIFIED", "remarks": "Valid certificate" },
-    { "name": "Marks Card", "status": "REJECTED", "remarks": "Image is not readable" }
+    { "documentId": "DOC-1", "name": "Income Certificate", "status": "VERIFIED", "remarks": "Valid" }
   ]
 }
 ```
 
-### Record eligibility
-`PATCH http://localhost:5004/api/reviews/REVIEW_ID/eligibility`
+Updates merge by `documentId` (or by name when no ID is provided), preserving other documents. Finalized reviews cannot be edited.
+
+### Eligibility
+
 ```json
-{
-  "eligible": true,
-  "remarks": "Meets the scholarship criteria"
-}
+{ "eligible": true, "remarks": "Meets the scholarship criteria" }
 ```
 
 ### Final decision
-`PATCH http://localhost:5004/api/reviews/REVIEW_ID/decision`
+
 ```json
-{
-  "decision": "APPROVED",
-  "remarks": "Documents verified and eligibility confirmed",
-  "reviewedBy": "REVIEWER01"
-}
+{ "decision": "APPROVED", "remarks": "All checks passed" }
 ```
 
-Allowed decisions: `APPROVED`, `REJECTED`, `CORRECTION_REQUIRED`.
-A review cannot be approved unless all documents are verified and eligibility is marked true.
+Allowed decisions: `APPROVED`, `REJECTED`, `CORRECTION_REQUIRED`. Approval is blocked unless at least one document exists, every document is `VERIFIED`, and eligibility is true. The reviewer ID is derived from the JWT.
 
-## Important integration note
-This service stores identifiers (`applicationId`, `studentId`, `scholarshipId`) rather than owning student, scholarship, or application data. During local development you can create reviews using the sample JSON above. Later, connect it to the Application and Scholarship services using their agreed REST APIs or events. Do not share another service's database tables directly.
+## Application Service callback
+
+After saving a final decision, Review Service calls:
+
+`PATCH ${APPLICATION_SERVICE_URL}/internal/applications/:applicationId/status`
+
+with `x-service-token`, `x-caller-service: review-service`, and body `{ "status": "APPROVED|REJECTED|CORRECTION_REQUIRED", "remarks": "...", "caller_service": "review-service" }`.
+
+The Application Service must expose this endpoint and validate the same internal service token. If the callback fails, the decision remains saved, the API responds `202 Accepted` with `callbackStatus: PENDING`, and the service retries pending callbacks every 30 seconds. The response is `200` when the callback succeeds.
+
+## Database
+
+`sql/schema.sql` creates `reviews` and `review_history`, including callback retry fields. Existing databases receive the two callback columns through `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Set `DB_AUTO_INIT=true` only where this service is allowed to create/alter its schema, or run the SQL manually.
+
+## Tests
+
+`npm test` runs unit tests with a mock Application Service callback. These tests do not replace a full four-service integration test. Confirm the Application Service accepts the documented callback payload and status values before the group demo.
