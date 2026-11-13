@@ -23,6 +23,7 @@ async function registerUser(req, res) {
         address,
         category,
         family_income,
+        family_size,
         state,
         city,
         academic_details
@@ -64,6 +65,7 @@ async function registerUser(req, res) {
         address,
         category,
         family_income,
+        family_size,
         state,
         city,
         academic_details

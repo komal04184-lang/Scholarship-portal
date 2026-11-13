@@ -187,6 +187,17 @@ export function normalizeScholarship(s) {
   };
 }
 
+// Backend user ko frontend shape mein convert karta hai (username -> name, role lowercase)
+export function normalizeUser(u) {
+  if (!u) return null;
+  return {
+    ...u,
+    id: u.id || u._id,
+    name: u.name || u.username || '',
+    role: (u.role || 'student').toLowerCase(),
+  };
+}
+
 // Local storage keys
 const TOKEN_KEY = 'apex_token';
 const USER_KEY = 'apex_user';
@@ -307,7 +318,7 @@ export async function getScholarshipById(id) {
 // ----------------------------------------------------
 // Authentication APIs
 // ----------------------------------------------------
-export async function loginApi(email, password, targetRole = 'student') {
+export async function loginApi(email, password) {
   const res = await request('/auth/login', {
     method: 'POST',
     body: JSON.stringify({
@@ -316,10 +327,7 @@ export async function loginApi(email, password, targetRole = 'student') {
     }),
   });
 
-  const normalizedUser = {
-    ...res.user,
-    role: (res.user.role || 'student').toLowerCase(),
-  };
+  const normalizedUser = normalizeUser(res.user);
 
   // User details localStorage mein save hongi.
   // JWT token backend HTTP-only cookie mein manage karega.
@@ -330,6 +338,17 @@ export async function loginApi(email, password, targetRole = 'student') {
     user: normalizedUser,
   };
 }
+
+export async function logoutApi() {
+  try {
+    await request('/auth/logout', { method: 'POST' });
+  } catch (err) {
+    console.warn('logoutApi error:', err.message);
+  } finally {
+    clearStoredAuth();
+  }
+}
+
 export async function registerApi(userData) {
   const payload = {
     username: userData.username || userData.name,
@@ -344,6 +363,8 @@ export async function registerApi(userData) {
     family_income:
       userData.family_income ?? userData.annual_income ?? null,
 
+    family_size: userData.family_size ?? null,
+
     state: userData.state || null,
     city: userData.city || null,
 
@@ -352,7 +373,7 @@ export async function registerApi(userData) {
       course: userData.course || null,
       branch: userData.branch || null,
       semester: userData.semester || null,
-      cgpa: userData.cgpa || null,
+      cgpa: userData.cgpa ?? null,
       passing_year: userData.passing_year || null,
     },
   };
@@ -362,10 +383,7 @@ export async function registerApi(userData) {
     body: JSON.stringify(payload),
   });
 
-  const normalizedUser = {
-    ...res.user,
-    role: (res.user.role || 'student').toLowerCase(),
-  };
+  const normalizedUser = normalizeUser(res.user);
 
   setStoredAuth(null, normalizedUser);
 
@@ -380,10 +398,7 @@ export async function getCurrentUser() {
     const res = await request('/profile/me');
 
     if (res.user) {
-      const normalizedUser = {
-        ...res.user,
-        role: (res.user.role || 'student').toLowerCase(),
-      };
+      const normalizedUser = normalizeUser(res.user);
 
       setStoredAuth(null, normalizedUser);
 
@@ -401,98 +416,70 @@ export async function getCurrentUser() {
 // Student APIs
 // ----------------------------------------------------
 export async function getStudentProfile() {
-  try {
-    const [profRes, acadRes] = await Promise.all([
-      request('/student/profile'),
-      request('/student/academics').catch(() => ({ academics: [] })),
-    ]);
+  // Backend: GET /api/v1/profile/me
+  const res = await request('/profile/me');
+  const u = res.user || {};
+  const a = u.academic_details || {};
+  const uid = String(u._id || u.id || '');
 
-    const profileData = profRes.profile || profRes;
-    const academicList = acadRes.academics || [];
-    const topAcademic = academicList[0] || {};
-
-    return {
-      student_id: profileData.student_id,
-      name: profileData.name || 'Student',
-      email: profileData.email || '',
-      phone: profileData.phone || '',
-      address: profileData.address || '',
-      gender: profileData.gender || 'Not Specified',
-      date_of_birth: profileData.date_of_birth,
-      academics: {
-        student_uid: `STU-2025-${profileData.student_id || '01'}`,
-        department: topAcademic.branch || topAcademic.course || 'Computer Science & Engineering',
-        major: topAcademic.branch || topAcademic.course || 'Computer Science',
-        degree_level: topAcademic.course || 'B.Tech',
-        current_year: topAcademic.semester ? Math.ceil(topAcademic.semester / 2) : 3,
-        cgpa: topAcademic.cgpa ? parseFloat(topAcademic.cgpa) : 8.5,
-        family_annual_income: profileData.annual_income ? parseFloat(profileData.annual_income) : 350000,
-        category: profileData.category || 'General',
-      },
-    };
-  } catch (err) {
-    console.warn('getStudentProfile fallback:', err.message);
-    const stored = getStoredUser();
-    return {
-      student_id: stored?.id || 1,
-      name: stored?.name || 'Rahul Sharma',
-      email: stored?.email || 'student@demo.com',
-      phone: '9876543210',
-      academics: {
-        student_uid: 'ENG2023-CS-042',
-        department: 'Computer Science & Engineering',
-        major: 'Computer Science',
-        degree_level: 'B.Tech',
-        current_year: 3,
-        cgpa: 8.5,
-        family_annual_income: 350000,
-        category: 'General',
-      },
-    };
-  }
+  return {
+    student_id: uid,
+    name: u.username || 'Student',
+    email: u.email || '',
+    phone: u.phone || '',
+    address: u.address || '',
+    state: u.state || '',
+    city: u.city || '',
+    gender: u.gender || 'Not Specified',
+    date_of_birth: u.date_of_birth,
+    academics: {
+      student_uid: uid ? `STU-${uid.slice(-6).toUpperCase()}` : '',
+      department: a.branch || a.course || '',
+      major: a.branch || a.course || '',
+      degree_level: a.course || '',
+      current_year: a.semester ? Math.ceil(a.semester / 2) : null,
+      cgpa: a.cgpa ?? null,
+      family_annual_income: u.family_income ?? null,
+      category: u.category || 'General',
+    },
+  };
 }
 
+// undefined / NaN / '' wali values backend ko nahi bhejte
+function stripEmpty(obj) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(
+      ([, v]) => v !== undefined && v !== '' && !(typeof v === 'number' && Number.isNaN(v))
+    )
+  );
+}
 
 export async function updateStudentProfile(profileData) {
-  try {
-    const payload = {
-      name: profileData.name,
-      phone: profileData.phone,
-      address: profileData.address,
-      gender: profileData.gender,
-      date_of_birth: profileData.date_of_birth,
+  // Backend: PUT /api/v1/profile/me
+  const payload = stripEmpty({
+    username: profileData.name,
+    phone: profileData.phone,
+    address: profileData.address,
+    gender: profileData.gender,
+    date_of_birth: profileData.date_of_birth,
+    family_income: profileData.family_annual_income ?? profileData.annual_income,
+    category: profileData.category,
+    state: profileData.state,
+    city: profileData.city,
+    academic_details: stripEmpty({
+      institution_name: profileData.institution_name,
+      course: profileData.course,
+      branch: profileData.branch,
+      semester: profileData.semester,
+      cgpa: profileData.cgpa,
+      passing_year: profileData.passing_year,
+    }),
+  });
 
-      family_annual_income:
-        profileData.family_annual_income ?? profileData.annual_income,
-
-      category: profileData.category,
-      state: profileData.state,
-      city: profileData.city,
-
-      academics: {
-        student_uid: profileData.student_uid,
-        department: profileData.department,
-        major: profileData.major,
-        degree_level: profileData.degree_level,
-        current_year: profileData.current_year,
-        cgpa: profileData.cgpa,
-        institution_name: profileData.institution_name,
-        course: profileData.course,
-        branch: profileData.branch,
-        semester: profileData.semester,
-        passing_year: profileData.passing_year,
-      },
-    };
-
-    return await request('/profile/me', {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
-
-  } catch (err) {
-    console.error('updateStudentProfile error:', err.message);
-    throw err;
-  }
+  return request('/profile/me', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getStudentApplications() {

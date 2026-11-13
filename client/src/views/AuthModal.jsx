@@ -20,8 +20,6 @@ import {
 import { useAuth } from '../context/AuthContext';
 
 export default function AuthModal({ isOpen, onClose, defaultTab = 'choose', onSuccess }) {
-  if (!isOpen) return null;
-
   const { login, register } = useAuth();
 
   // Selected role: 'choose', 'student', 'admin'
@@ -139,6 +137,8 @@ export default function AuthModal({ isOpen, onClose, defaultTab = 'choose', onSu
       setLoading(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div

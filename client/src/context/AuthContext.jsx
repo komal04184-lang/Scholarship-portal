@@ -1,42 +1,49 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
   getStoredUser,
-  getStoredToken,
   clearStoredAuth,
   loginApi,
   registerApi,
+  logoutApi,
   getCurrentUser,
 } from '../services/api';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  // Pehle localStorage wala user dikhao (flicker avoid), phir cookie se verify karo
+  const [user, setUser] = useState(() => getStoredUser());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = getStoredToken();
-    const storedUser = getStoredUser();
-    if (token && storedUser) {
-      setUser(storedUser);
-      // Verify token in background
-      getCurrentUser()
-        .then((verified) => {
-          if (verified) setUser(verified);
-        })
-        .catch(() => {
-          // Token expired or invalid
+    // JWT HTTP-only cookie mein hai, JS usse padh nahi sakta,
+    // isliye server se /profile/me pooch ke session verify hota hai.
+    getCurrentUser()
+      .then((verified) => {
+        if (verified) {
+          setUser(verified);
+        } else {
           clearStoredAuth();
           setUser(null);
-        })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+        }
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const login = async (email, password, role = 'student') => {
-    const res = await loginApi(email, password, role);
+    const res = await loginApi(email, password);
+    const isStaff = ['admin', 'reviewer', 'officer'].includes(res.user.role);
+
+    // Student ID se admin desk (ya admin ID se student portal) mein login block karo
+    if (role === 'admin' && !isStaff) {
+      await logoutApi();
+      throw new Error('This account is not authorised for the Admin & Officer Desk.');
+    }
+    if (role === 'student' && isStaff) {
+      await logoutApi();
+      throw new Error('Please use the Admin & Officer Desk to sign in with this account.');
+    }
+
     setUser(res.user);
     return res;
   };
@@ -47,8 +54,8 @@ export function AuthProvider({ children }) {
     return res;
   };
 
-  const logout = () => {
-    clearStoredAuth();
+  const logout = async () => {
+    await logoutApi(); // server par cookie clear hoti hai
     setUser(null);
   };
 
