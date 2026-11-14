@@ -2,39 +2,40 @@ const { query } = require('../config/database');
 
 class StatusRepository {
   /**
-   * Append a status change event to the audit history
+   * Append a status change event to the audit history (application_status_history table)
    */
   static async addHistory(data, dbClient = null) {
     const executor = dbClient ? dbClient.query.bind(dbClient) : query;
 
     const sql = `
-      INSERT INTO application_status (
+      INSERT INTO application_status_history (
         application_id,
-        status,
         previous_status,
         new_status,
-        comment,
-        remarks,
-        changed_by,
+        changed_by_user_id,
         changed_by_role,
+        reason,
         changed_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-      RETURNING *;
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      RETURNING *,
+                id AS status_id,
+                new_status AS status,
+                reason AS comment,
+                reason AS remarks,
+                changed_by_user_id AS changed_by;
     `;
 
     const statusVal = data.new_status || data.status;
-    const commentVal = data.remarks || data.comment || '';
+    const commentVal = data.remarks || data.comment || data.reason || '';
 
     const res = await executor(sql, [
       data.application_id,
-      statusVal,
       data.previous_status || null,
       statusVal,
-      commentVal,
-      commentVal,
-      String(data.changed_by || 'SYSTEM'),
+      String(data.changed_by_user_id || data.changed_by || 'SYSTEM'),
       data.changed_by_role || null,
+      commentVal,
     ]);
 
     return res.rows[0];
@@ -45,17 +46,18 @@ class StatusRepository {
    */
   static async getByApplicationId(applicationId) {
     const sql = `
-      SELECT status_id,
+      SELECT id,
+             id AS status_id,
              application_id,
-             status,
+             new_status AS status,
              previous_status,
              new_status,
-             COALESCE(remarks, comment) AS comment,
-             COALESCE(remarks, comment) AS remarks,
-             changed_by,
+             reason AS comment,
+             reason AS remarks,
+             changed_by_user_id AS changed_by,
              changed_by_role,
              changed_at
-      FROM application_status
+      FROM application_status_history
       WHERE application_id::TEXT = $1::TEXT
       ORDER BY changed_at ASC;
     `;
@@ -65,4 +67,3 @@ class StatusRepository {
 }
 
 module.exports = StatusRepository;
-

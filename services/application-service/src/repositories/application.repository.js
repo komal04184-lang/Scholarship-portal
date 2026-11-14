@@ -1,4 +1,4 @@
-const { query, getMongoDb } = require('../config/database');
+const { query } = require('../config/database');
 const { generateApplicationNumber } = require('../utils/application-id');
 
 class ApplicationRepository {
@@ -7,8 +7,10 @@ class ApplicationRepository {
    */
   static async findExisting(studentId, scholarshipId) {
     const sql = `
-      SELECT * FROM application
-      WHERE student_id::TEXT = $1::TEXT AND scholarship_id::TEXT = $2::TEXT
+      SELECT a.*,
+             a.id AS application_id
+      FROM applications a
+      WHERE a.student_id::TEXT = $1::TEXT AND a.scholarship_id::TEXT = $2::TEXT
       LIMIT 1;
     `;
     const res = await query(sql, [String(studentId), String(scholarshipId)]);
@@ -16,65 +18,76 @@ class ApplicationRepository {
   }
 
   /**
-   * Create new application in database
+   * Create new application in database (applications table)
    */
   static async create(data, dbClient = null) {
     const executor = dbClient ? dbClient.query.bind(dbClient) : query;
-
-    const sql = `
-      INSERT INTO application (
-        student_id,
-        scholarship_id,
-        status,
-        statement,
-        sop,
-        academic_year,
-        submitted_at,
-        updated_at,
-        application_date
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), CURRENT_DATE)
-      RETURNING *;
-    `;
 
     const status = data.status || 'SUBMITTED';
     const statement = data.statement || data.sop || '';
     const sop = data.sop || data.statement || '';
     const academicYear = data.academic_year || '2026-2027';
+    const metadata = data.metadata || {};
+    const submittedAt = status === 'SUBMITTED' ? new Date() : null;
+
+    // First generate a temporary application number
+    const tempNum = `APP-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
+
+    const sql = `
+      INSERT INTO applications (
+        application_number,
+        student_id,
+        scholarship_id,
+        status,
+        academic_year,
+        statement,
+        sop,
+        metadata,
+        submitted_at,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+      RETURNING *, id AS application_id;
+    `;
 
     const res = await executor(sql, [
-      data.student_id,
-      data.scholarship_id,
+      tempNum,
+      String(data.student_id),
+      String(data.scholarship_id),
       status,
+      academicYear,
       statement,
       sop,
-      academicYear,
+      JSON.stringify(metadata),
+      submittedAt,
     ]);
 
     const created = res.rows[0];
 
-    // Assign application_number
-    const appNumber = generateApplicationNumber(created.application_id);
+    // Compute formatted application number based on row or UUID
+    const finalAppNumber = `APP-${new Date().getFullYear()}-${created.id.substring(0, 8).toUpperCase()}`;
     await executor(
-      `UPDATE application SET application_number = $1 WHERE application_id = $2`,
-      [appNumber, created.application_id]
+      `UPDATE applications SET application_number = $1 WHERE id = $2`,
+      [finalAppNumber, created.id]
     );
-    created.application_number = appNumber;
+    created.application_number = finalAppNumber;
 
     return created;
   }
 
   /**
-   * Find application by ID
+   * Find application by ID or application_number
    */
   static async findById(applicationId) {
     const sql = `
       SELECT a.*,
-             COUNT(d.application_document_id) AS document_count
-      FROM application a
-      LEFT JOIN application_document d ON a.application_id = d.application_id
-      WHERE a.application_id::TEXT = $1::TEXT OR a.application_number = $1::TEXT
-      GROUP BY a.application_id;
+             a.id AS application_id,
+             COUNT(d.id) AS document_count
+      FROM applications a
+      LEFT JOIN application_documents d ON a.id = d.application_id AND d.is_current = true
+      WHERE a.id::TEXT = $1::TEXT OR a.application_number = $1::TEXT
+      GROUP BY a.id;
     `;
     const res = await query(sql, [String(applicationId)]);
     return res.rows[0] || null;
@@ -86,9 +99,10 @@ class ApplicationRepository {
   static async findByStudentId(studentId, options = {}) {
     let sql = `
       SELECT a.*,
-             COUNT(d.application_document_id) AS document_count
-      FROM application a
-      LEFT JOIN application_document d ON a.application_id = d.application_id
+             a.id AS application_id,
+             COUNT(d.id) AS document_count
+      FROM applications a
+      LEFT JOIN application_documents d ON a.id = d.application_id AND d.is_current = true
       WHERE a.student_id::TEXT = $1::TEXT
     `;
     const params = [String(studentId)];
@@ -98,7 +112,7 @@ class ApplicationRepository {
       sql += ` AND a.status = $${params.length}`;
     }
 
-    sql += ` GROUP BY a.application_id ORDER BY a.submitted_at DESC`;
+    sql += ` GROUP BY a.id ORDER BY a.created_at DESC`;
 
     if (options.limit) {
       params.push(options.limit);
@@ -133,22 +147,23 @@ class ApplicationRepository {
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
     // Count query
-    const countSql = `SELECT COUNT(*) FROM application a ${whereSql};`;
+    const countSql = `SELECT COUNT(*) FROM applications a ${whereSql};`;
     const countRes = await query(countSql, params);
     const total = parseInt(countRes.rows[0].count, 10);
 
     // Data query
     let dataSql = `
       SELECT a.*,
-             COUNT(d.application_document_id) AS document_count
-      FROM application a
-      LEFT JOIN application_document d ON a.application_id = d.application_id
+             a.id AS application_id,
+             COUNT(d.id) AS document_count
+      FROM applications a
+      LEFT JOIN application_documents d ON a.id = d.application_id AND d.is_current = true
       ${whereSql}
-      GROUP BY a.application_id
-      ORDER BY a.submitted_at ${options.sort === 'ASC' ? 'ASC' : 'DESC'}
+      GROUP BY a.id
+      ORDER BY a.created_at ${options.sort === 'ASC' ? 'ASC' : 'DESC'}
     `;
 
-    const limit = options.limit || 10;
+    const limit = options.limit || 20;
     const offset = options.offset || 0;
 
     params.push(limit);
@@ -167,7 +182,7 @@ class ApplicationRepository {
   }
 
   /**
-   * Update application fields
+   * Update application fields (statement, sop, academic_year, metadata)
    */
   static async update(applicationId, updates, dbClient = null) {
     const executor = dbClient ? dbClient.query.bind(dbClient) : query;
@@ -187,19 +202,19 @@ class ApplicationRepository {
       fields.push(`academic_year = $${idx++}`);
       values.push(updates.academic_year);
     }
-    if (updates.last_updated_by !== undefined) {
-      fields.push(`last_updated_by = $${idx++}`);
-      values.push(updates.last_updated_by);
+    if (updates.metadata !== undefined) {
+      fields.push(`metadata = $${idx++}`);
+      values.push(JSON.stringify(updates.metadata));
     }
 
     fields.push(`updated_at = NOW()`);
     values.push(String(applicationId));
 
     const sql = `
-      UPDATE application
+      UPDATE applications
       SET ${fields.join(', ')}
-      WHERE application_id::TEXT = $${idx}::TEXT
-      RETURNING *;
+      WHERE id::TEXT = $${idx}::TEXT OR application_number = $${idx}::TEXT
+      RETURNING *, id AS application_id;
     `;
 
     const res = await executor(sql, values);
@@ -211,22 +226,30 @@ class ApplicationRepository {
    */
   static async updateStatus(applicationId, newStatus, dbClient = null) {
     const executor = dbClient ? dbClient.query.bind(dbClient) : query;
+    
+    let extraFields = '';
+    if (newStatus === 'SUBMITTED') {
+      extraFields = ', submitted_at = NOW()';
+    } else if (newStatus === 'WITHDRAWN') {
+      extraFields = ', withdrawn_at = NOW()';
+    }
+
     const sql = `
-      UPDATE application
-      SET status = $1, updated_at = NOW()
-      WHERE application_id::TEXT = $2::TEXT
-      RETURNING *;
+      UPDATE applications
+      SET status = $1, updated_at = NOW() ${extraFields}
+      WHERE id::TEXT = $2::TEXT OR application_number = $2::TEXT
+      RETURNING *, id AS application_id;
     `;
     const res = await executor(sql, [newStatus, String(applicationId)]);
     return res.rows[0] || null;
   }
 
   /**
-   * Idempotency handling
+   * Idempotency record storage (idempotency_keys table in application_db)
    */
   static async getIdempotencyRecord(key) {
     const sql = `
-      SELECT * FROM application_idempotency
+      SELECT * FROM idempotency_keys
       WHERE idempotency_key = $1 AND expires_at > NOW()
       LIMIT 1;
     `;
@@ -234,55 +257,28 @@ class ApplicationRepository {
     return res.rows[0] || null;
   }
 
-  static async saveIdempotencyRecord(key, studentId, requestHash, status, body) {
+  static async saveIdempotencyRecord(key, userId, requestHash, status, body) {
     const sql = `
-      INSERT INTO application_idempotency (
-        idempotency_key, student_id, request_hash, response_status, response_body
+      INSERT INTO idempotency_keys (
+        idempotency_key, user_id, request_hash, response_status, response_body, created_at, expires_at
       )
-      VALUES ($1, $2, $3, $4, $5)
+      VALUES ($1, $2, $3, $4, $5, NOW(), NOW() + INTERVAL '24 hours')
       ON CONFLICT (idempotency_key) DO UPDATE
       SET response_status = EXCLUDED.response_status,
           response_body = EXCLUDED.response_body;
     `;
-    await query(sql, [key, String(studentId), requestHash || null, status, JSON.stringify(body)]);
-  }
-
-  /**
-   * MongoDB Application Snapshot storage
-   */
-  static async saveSnapshot(applicationId, snapshotPayload) {
-    const db = getMongoDb();
-    if (!db) return null;
     try {
-      const collection = db.collection('application_snapshots');
-      await collection.updateOne(
-        { application_id: String(applicationId) },
-        {
-          $set: {
-            application_id: String(applicationId),
-            payload: snapshotPayload,
-            captured_at: new Date(),
-          },
-        },
-        { upsert: true }
-      );
-      return true;
-    } catch (err) {
-      return null;
-    }
-  }
-
-  static async getSnapshot(applicationId) {
-    const db = getMongoDb();
-    if (!db) return null;
-    try {
-      const collection = db.collection('application_snapshots');
-      return await collection.findOne({ application_id: String(applicationId) });
-    } catch (err) {
-      return null;
+      await query(sql, [
+        key,
+        String(userId),
+        requestHash || 'HASH',
+        status,
+        JSON.stringify(body || {}),
+      ]);
+    } catch (e) {
+      console.warn('Idempotency key save error:', e.message);
     }
   }
 }
 
 module.exports = ApplicationRepository;
-

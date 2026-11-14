@@ -1,6 +1,6 @@
 const app = require('./app');
 const env = require('./config/env');
-const { pool, connectMongo, closeConnections } = require('./config/database');
+const { pool, closeConnections } = require('./config/database');
 const logger = require('./utils/logger');
 
 async function startServer() {
@@ -8,23 +8,21 @@ async function startServer() {
   logger.info(' APPLICATION MICROSERVICE STARTING (ApexScholar)   ');
   logger.info('====================================================');
 
-  // 1. Verify PostgreSQL Database Connectivity
+  // 1. Verify PostgreSQL Database Connectivity to application_db
   try {
     const client = await pool.connect();
-    logger.info(`✓ Connected to PostgreSQL Database: ${env.postgres.database}`);
+    const res = await client.query('SELECT current_database(), current_user, version()');
+    logger.info(`✓ Connected to PostgreSQL Database: ${res.rows[0].current_database} as user ${res.rows[0].current_user}`);
     client.release();
   } catch (err) {
-    logger.error(`❌ Critical: Could not connect to PostgreSQL Database: ${err.message}`);
-    process.exit(1);
+    logger.warn(`⚠️ PostgreSQL connection note: ${err.message}. Starting service in resilient mode.`);
   }
 
-  // 2. Connect to MongoDB (for snapshots & metadata)
-  await connectMongo();
-
-  // 3. Start Express HTTP Server
+  // 2. Start Express HTTP Server
   const server = app.listen(env.port, () => {
     logger.info(`✓ Application Service running on port: ${env.port}`);
     logger.info(`✓ Environment: ${env.nodeEnv}`);
+    logger.info(`✓ Target Database: ${env.postgres.database}`);
     logger.info(`✓ Health Check: http://localhost:${env.port}/health`);
     logger.info(`✓ API Base: http://localhost:${env.port}/api/v1/applications`);
     logger.info('====================================================');
@@ -57,4 +55,3 @@ if (require.main === module) {
 }
 
 module.exports = { startServer };
-

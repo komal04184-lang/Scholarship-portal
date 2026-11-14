@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 
 const env = require('./config/env');
-const { pool, getMongoDb } = require('./config/database');
+const { pool, testConnection } = require('./config/database');
 const applicationRoutes = require('./routes/application.routes');
 const documentRoutes = require('./routes/document.routes');
 const internalRoutes = require('./routes/internal.routes');
@@ -28,8 +28,8 @@ app.use(cors({
   credentials: true,
 }));
 app.use(cookieParser());
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 if (!env.isProduction) {
   app.use(morgan('dev'));
@@ -39,8 +39,9 @@ if (!env.isProduction) {
 app.get('/', (req, res) => {
   return ApiResponse.success(res, 'ApexScholar Application Microservice is operational', {
     service: 'application-service',
-    version: '1.0.0',
+    version: '2.0.0',
     port: env.port,
+    database: env.postgres.database,
     status: 'online',
     endpoints: {
       health: `http://localhost:${env.port}/health`,
@@ -51,21 +52,22 @@ app.get('/', (req, res) => {
   });
 });
 
-// Top-Level Health Check Endpoint
+// Top-Level Health Check Endpoint (PostgreSQL only, strictly NO MongoDB)
 app.get('/health', async (req, res) => {
   let pgStatus = false;
+  let pgDb = env.postgres.database;
+  let pgUser = null;
   let pgTime = null;
 
   try {
-    const resPg = await pool.query('SELECT NOW() as current_time');
+    const resPg = await pool.query('SELECT current_database(), current_user, NOW() as current_time');
     pgStatus = true;
+    pgDb = resPg.rows[0].current_database;
+    pgUser = resPg.rows[0].current_user;
     pgTime = resPg.rows[0].current_time;
   } catch (e) {
     pgStatus = false;
   }
-
-  const mongoDb = getMongoDb();
-  const mongoStatus = !!mongoDb;
 
   const isHealthy = pgStatus;
 
@@ -75,15 +77,17 @@ app.get('/health', async (req, res) => {
     port: env.port,
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
+    database: {
+      engine: 'PostgreSQL',
+      connected: pgStatus,
+      database: pgDb,
+      user: pgUser,
+      server_time: pgTime,
+    },
     dependencies: {
       postgres: {
         connected: pgStatus,
-        database: env.postgres.database,
-        time: pgTime,
-      },
-      mongodb: {
-        connected: mongoStatus,
-        database: env.mongodb.database,
+        database: pgDb,
       },
       identity_service_url: env.services.identityServiceUrl,
       scholarship_service_url: env.services.scholarshipServiceUrl,

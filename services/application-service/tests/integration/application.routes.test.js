@@ -5,7 +5,7 @@ const fs = require('fs');
 
 const app = require('../../src/app');
 const env = require('../../src/config/env');
-const { pool, connectMongo, closeConnections } = require('../../src/config/database');
+const { pool, closeConnections } = require('../../src/config/database');
 
 const JWT_SECRET = env.jwt.secret;
 
@@ -24,23 +24,20 @@ let createdAppId = null;
 let createdDocId = null;
 
 beforeAll(async () => {
-  await connectMongo();
-  // Create an active test scholarship in DB
-  const res = await pool.query(`
-    INSERT INTO scholarship (name, description, amount, status, deadline)
-    VALUES ('Integration Test Scholarship', 'Automated Test Program', 75000.00, 'ACTIVE', NOW() + INTERVAL '30 days')
-    RETURNING scholarship_id;
-  `);
-  testScholarshipId = res.rows[0].scholarship_id;
+  // Independent Application Service schema - scholarship_id is a unique service reference
+  testScholarshipId = `SCH-INT-${Date.now()}`;
 });
 
 afterAll(async () => {
   if (testScholarshipId) {
     try {
-      await pool.query('DELETE FROM application_document WHERE application_id IN (SELECT application_id FROM application WHERE scholarship_id = $1)', [testScholarshipId]);
-      await pool.query('DELETE FROM application_status WHERE application_id IN (SELECT application_id FROM application WHERE scholarship_id = $1)', [testScholarshipId]);
-      await pool.query('DELETE FROM application WHERE scholarship_id = $1', [testScholarshipId]);
-      await pool.query('DELETE FROM scholarship WHERE scholarship_id = $1', [testScholarshipId]);
+      await pool.query('DELETE FROM application_documents WHERE application_id IN (SELECT id FROM applications WHERE scholarship_id = $1)', [testScholarshipId]);
+      await pool.query('DELETE FROM application_status_history WHERE application_id IN (SELECT id FROM applications WHERE scholarship_id = $1)', [testScholarshipId]);
+      await pool.query('DELETE FROM application_audit_logs WHERE application_id IN (SELECT id FROM applications WHERE scholarship_id = $1)', [testScholarshipId]);
+      await pool.query('DELETE FROM outbox_events WHERE aggregate_id IN (SELECT id::text FROM applications WHERE scholarship_id = $1)', [testScholarshipId]);
+      await pool.query('DELETE FROM application_form_answers WHERE application_id IN (SELECT id FROM applications WHERE scholarship_id = $1)', [testScholarshipId]);
+      await pool.query('DELETE FROM application_document_requirements WHERE application_id IN (SELECT id FROM applications WHERE scholarship_id = $1)', [testScholarshipId]);
+      await pool.query('DELETE FROM applications WHERE scholarship_id = $1', [testScholarshipId]);
     } catch (e) {}
   }
   await closeConnections();

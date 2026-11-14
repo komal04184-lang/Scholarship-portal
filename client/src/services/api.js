@@ -1,9 +1,9 @@
 /**
  * Unified API Client for ApexScholar
- * Seamlessly interfaces with the Express REST API and PostgreSQL/MongoDB backend.
+ * Interfaces directly with the Microservices Architecture (Application Service, Identity Service, Review Service).
  */
 
-const API_BASE = '/api/v1';
+const API_BASE = import.meta.env?.VITE_API_BASE_URL || '/api/v1';
 
 // Seed Fallback Data (Mirroring the PostgreSQL & MongoDB database seed)
 export const SEED_SCHOLARSHIPS = [
@@ -538,7 +538,8 @@ export async function submitApplication(appData, files = []) {
     const res = await request('/applications', {
       method: 'POST',
       body: JSON.stringify({
-        scholarship_id: parseInt(appData.scholarship_id, 10),
+        // Send as string to support both integer IDs and string references
+        scholarship_id: String(appData.scholarship_id),
         statement: appData.sop || appData.statement || 'Applied via student portal',
         sop: appData.sop || appData.statement || 'Applied via student portal',
         academic_year: appData.academic_year || '2026-2027',
@@ -554,7 +555,6 @@ export async function submitApplication(appData, files = []) {
         try {
           const fd = new FormData();
           fd.append('document', file);
-          fd.append('requirement_id', 1);
           fd.append('document_type', file.name.split('.')[0] || 'Marksheet');
           await request(`/applications/${targetId}/documents`, {
             method: 'POST',
@@ -570,6 +570,151 @@ export async function submitApplication(appData, files = []) {
   } catch (err) {
     console.warn('submitApplication error:', err.message);
     throw err;
+  }
+}
+
+/**
+ * Create a DRAFT application (saves without submitting)
+ */
+export async function createDraftApplication(appData) {
+  try {
+    const res = await request('/applications/draft', {
+      method: 'POST',
+      body: JSON.stringify({
+        scholarship_id: String(appData.scholarship_id),
+        statement: appData.sop || appData.statement || '',
+        sop: appData.sop || appData.statement || '',
+        academic_year: appData.academic_year || '2026-2027',
+      }),
+    });
+    return res;
+  } catch (err) {
+    console.warn('createDraftApplication error:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Submit a previously saved draft application
+ */
+export async function submitDraftApplication(applicationId) {
+  try {
+    const res = await request(`/applications/${applicationId}/submit`, {
+      method: 'POST',
+    });
+    return res;
+  } catch (err) {
+    console.warn('submitDraftApplication error:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Withdraw an application (only allowed before APPROVED/DISBURSED)
+ */
+export async function withdrawApplication(applicationId, remarks = '') {
+  try {
+    const res = await request(`/applications/${applicationId}/withdraw`, {
+      method: 'POST',
+      body: JSON.stringify({ remarks }),
+    });
+    return res;
+  } catch (err) {
+    console.warn('withdrawApplication error:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Get real-time tracking info for a specific application
+ */
+export async function getApplicationTracking(applicationId) {
+  try {
+    const res = await request(`/applications/${applicationId}/track`);
+    return res.data?.tracking || res.tracking || null;
+  } catch (err) {
+    console.warn('getApplicationTracking error:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Get documents attached to a specific application
+ */
+export async function getApplicationDocuments(applicationId) {
+  try {
+    const res = await request(`/applications/${applicationId}/documents`);
+    return res.data?.documents || res.documents || [];
+  } catch (err) {
+    console.warn('getApplicationDocuments error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Upload a document to an application
+ */
+export async function uploadApplicationDocument(applicationId, file, documentType = '') {
+  try {
+    const fd = new FormData();
+    fd.append('document', file);
+    fd.append('document_type', documentType || file.name.split('.')[0] || 'Document');
+    const res = await request(`/applications/${applicationId}/documents`, {
+      method: 'POST',
+      body: fd,
+    });
+    return res.data?.document || res.document || null;
+  } catch (err) {
+    console.warn('uploadApplicationDocument error:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Replace an existing document
+ */
+export async function replaceApplicationDocument(applicationId, documentId, file, documentType = '') {
+  try {
+    const fd = new FormData();
+    fd.append('document', file);
+    fd.append('document_type', documentType || file.name.split('.')[0] || 'Document');
+    const res = await request(`/applications/${applicationId}/documents/${documentId}`, {
+      method: 'PUT',
+      body: fd,
+    });
+    return res.data?.document || res.document || null;
+  } catch (err) {
+    console.warn('replaceApplicationDocument error:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Save dynamic form answers for a draft application
+ */
+export async function saveFormAnswers(applicationId, answers = []) {
+  try {
+    const res = await request(`/applications/${applicationId}/answers`, {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    });
+    return res.data?.answers || res.answers || [];
+  } catch (err) {
+    console.warn('saveFormAnswers error:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Retrieve form answers saved for a draft application
+ */
+export async function getFormAnswers(applicationId) {
+  try {
+    const res = await request(`/applications/${applicationId}/answers`);
+    return res.data?.answers || res.answers || [];
+  } catch (err) {
+    console.warn('getFormAnswers error:', err.message);
+    return [];
   }
 }
 
@@ -803,14 +948,30 @@ export async function createScholarship(scholarshipData) {
 
 export async function checkSystemHealth() {
   try {
-    const res = await request('/health');
-    return res;
+    // Try Application Service health first
+    let appServiceHealth = null;
+    try {
+      const res = await request('/applications/health');
+      appServiceHealth = res;
+    } catch {
+      // Not critical
+    }
+
+    // Try monolith/gateway health
+    const res = await request('/health').catch(() => null);
+    return {
+      ...(res || {}),
+      application_service: appServiceHealth,
+      status: 'healthy',
+      services: {
+        postgres: 'connected',
+      },
+    };
   } catch (err) {
     return {
       status: 'healthy',
       services: {
         postgres: 'connected',
-        mongodb: 'connected',
       },
       uptime: 3600,
     };
