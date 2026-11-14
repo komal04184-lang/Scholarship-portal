@@ -14,15 +14,29 @@ import {
   Award,
   DollarSign,
   Briefcase,
+  RefreshCw,
+  Download,
+  X,
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge';
-import { getStudentApplications, getStudentProfile, updateStudentProfile } from '../services/api';
+import {
+  getStudentApplications,
+  getStudentProfile,
+  updateStudentProfile,
+  getApplicationTracking,
+  getApplicationDocuments,
+  withdrawApplication,
+} from '../services/api';
 
 export default function StudentDashboard({ onBrowseScholarships }) {
   const [profile, setProfile] = useState(null);
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState(null);
+  const [tracking, setTracking] = useState(null);
+  const [documents, setDocuments] = useState([]);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
 
   // Profile Edit modal
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -36,6 +50,15 @@ export default function StudentDashboard({ onBrowseScholarships }) {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (selectedApp?.raw_id) {
+      loadTrackingAndDocuments(selectedApp.raw_id);
+    } else {
+      setTracking(null);
+      setDocuments([]);
+    }
+  }, [selectedApp?.raw_id]);
 
   const loadData = async () => {
     setLoading(true);
@@ -60,6 +83,37 @@ export default function StudentDashboard({ onBrowseScholarships }) {
       console.error('Error loading student dashboard:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTrackingAndDocuments = async (appId) => {
+    setTrackingLoading(true);
+    try {
+      const [trackingData, docsData] = await Promise.all([
+        getApplicationTracking(appId),
+        getApplicationDocuments(appId),
+      ]);
+      setTracking(trackingData);
+      setDocuments(docsData);
+    } catch (err) {
+      console.warn('Error loading tracking/documents:', err);
+    } finally {
+      setTrackingLoading(false);
+    }
+  };
+
+  const handleWithdraw = async () => {
+    if (!selectedApp?.raw_id) return;
+    if (!window.confirm('Are you sure you want to withdraw this application? This action cannot be undone.')) return;
+    setWithdrawing(true);
+    try {
+      await withdrawApplication(selectedApp.raw_id, 'Withdrawn by student via portal');
+      await loadData();
+      alert('Application withdrawn successfully.');
+    } catch (err) {
+      alert('Could not withdraw: ' + err.message);
+    } finally {
+      setWithdrawing(false);
     }
   };
 
@@ -102,6 +156,19 @@ export default function StudentDashboard({ onBrowseScholarships }) {
   }
 
   const academics = profile?.academics || {};
+
+  // Build timeline from either tracking API data or fallback from application data
+  const timeline = tracking?.timeline?.length > 0
+    ? tracking.timeline.map((h) => ({
+        status: h.status,
+        title: `Status: ${h.status.replace(/_/g, ' ')}`,
+        date: h.timestamp ? new Date(h.timestamp).toLocaleDateString() : '—',
+        note: h.comment || h.changed_by ? `By ${h.changed_by || 'System'}` : '',
+      }))
+    : (selectedApp?.review_timeline || []);
+
+  const progressPct = tracking?.progress_percentage ?? null;
+  const canWithdraw = selectedApp && ['DRAFT', 'SUBMITTED', 'DOCUMENTS_REQUIRED', 'RESUBMISSION_REQUIRED', 'CORRECTION_REQUIRED'].includes(selectedApp?.status);
 
   return (
     <div style={{ maxWidth: '1360px', margin: '0 auto', padding: '2.5rem 1.5rem 5rem' }}>
@@ -175,42 +242,42 @@ export default function StudentDashboard({ onBrowseScholarships }) {
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Quick Academic Indicators */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '1rem',
-          marginTop: '1.75rem',
-          paddingTop: '1.5rem',
-          borderTop: '1px solid var(--border-subtle)',
-        }}>
-          <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Cumulative CGPA</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#34D399' }}>
-              {academics.cgpa || '8.95'} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>/ 10.0</span>
-            </div>
+      {/* Quick Academic Indicators */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '1rem',
+        marginTop: '1.75rem',
+        paddingTop: '1.5rem',
+        borderTop: '1px solid var(--border-subtle)',
+      }}>
+        <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Cumulative CGPA</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#34D399' }}>
+            {academics.cgpa || '8.95'} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>/ 10.0</span>
           </div>
+        </div>
 
-          <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Family Annual Income</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#60A5FA' }}>
-              ₹{(academics.family_annual_income || 420000).toLocaleString('en-IN')}
-            </div>
+        <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Family Annual Income</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#60A5FA' }}>
+            ₹{(academics.family_annual_income || 420000).toLocaleString('en-IN')}
           </div>
+        </div>
 
-          <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Program & Year</div>
-            <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              {academics.degree_level || 'B.Tech'} (Year {academics.current_year || 3})
-            </div>
+        <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Program & Year</div>
+          <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+            {academics.degree_level || 'B.Tech'} (Year {academics.current_year || 3})
           </div>
+        </div>
 
-          <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Active Grants</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#A78BFA' }}>
-              ₹1,25,000 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>(Sanctioned)</span>
-            </div>
+        <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Applications</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#A78BFA' }}>
+            {applications.length} <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Total</span>
           </div>
         </div>
       </div>
@@ -292,6 +359,30 @@ export default function StudentDashboard({ onBrowseScholarships }) {
                 <StatusBadge status={selectedApp.status} size="lg" />
               </div>
 
+              {/* Progress bar */}
+              {progressPct !== null && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
+                    <span>Application Progress</span>
+                    <span style={{ color: progressPct >= 90 ? '#34D399' : 'var(--accent-primary)' }}>{progressPct}%</span>
+                  </div>
+                  <div style={{ height: '6px', borderRadius: '3px', background: 'rgba(255,255,255,0.08)' }}>
+                    <div style={{
+                      height: '100%',
+                      borderRadius: '3px',
+                      width: `${progressPct}%`,
+                      background: progressPct >= 90 ? '#34D399' : 'var(--accent-gradient)',
+                      transition: 'width 0.5s ease',
+                    }} />
+                  </div>
+                  {tracking?.next_step && (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.4rem' }}>
+                      Next: {tracking.next_step}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Step progression diagram */}
               <div style={{
                 background: 'rgba(15, 23, 42, 0.6)',
@@ -301,15 +392,12 @@ export default function StudentDashboard({ onBrowseScholarships }) {
                 marginBottom: '1.75rem',
               }}>
                 <h4 style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '1.25rem', textTransform: 'uppercase' }}>
-                  Verification & Review Progression
+                  Verification & Review Progression{trackingLoading && <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem' }}>Loading...</span>}
                 </h4>
 
                 {/* Vertical timeline items */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  {(selectedApp.review_timeline || [
-                    { status: 'SUBMITTED', title: 'Application Submitted', date: 'Oct 01, 2026', note: 'All mandatory documents uploaded.' },
-                    { status: 'UNDER_REVIEW', title: 'Department Scrutiny', date: 'In Progress', note: 'Academic marksheet verified by Engineering Department.' },
-                  ]).map((t, idx) => (
+                  {(timeline.length > 0 ? timeline : [{ status: 'SUBMITTED', title: 'Application Submitted', date: new Date(selectedApp.submitted_at || Date.now()).toLocaleDateString(), note: 'Submitted via ApexScholar portal.' }]).map((t, idx) => (
                     <div key={idx} style={{ display: 'flex', gap: '1rem', position: 'relative' }}>
                       <div style={{
                         width: '28px',
@@ -327,17 +415,11 @@ export default function StudentDashboard({ onBrowseScholarships }) {
                       </div>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                          <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                            {t.title}
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {t.date}
-                          </span>
+                          <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>{t.title}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t.date}</span>
                         </div>
                         {t.note && (
-                          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                            {t.note}
-                          </div>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>{t.note}</div>
                         )}
                       </div>
                     </div>
@@ -365,38 +447,65 @@ export default function StudentDashboard({ onBrowseScholarships }) {
                 </div>
               )}
 
-              {/* Uploaded Documents */}
-              <div>
+              {/* Uploaded Documents from Application Service */}
+              <div style={{ marginBottom: '1.5rem' }}>
                 <h4 style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
-                  Attached Documents ({selectedApp.documents?.length || 0})
+                  Attached Documents ({documents.length || selectedApp.documents?.length || 0})
                 </h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
-                  {(selectedApp.documents || []).map((doc, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.6rem',
-                        padding: '0.6rem 0.85rem',
-                        background: 'rgba(255, 255, 255, 0.04)',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-subtle)',
-                      }}
-                    >
-                      <FileText size={16} color="#06B6D4" />
-                      <div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500 }}>
-                          {doc.name}
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: doc.verified ? '#34D399' : 'var(--text-muted)' }}>
-                          {doc.size} · {doc.verified ? 'Verified' : 'Pending Verification'}
+                  {(documents.length > 0 ? documents : (selectedApp.documents || [])).map((doc, idx) => {
+                    const fileName = doc.original_filename || doc.name || `Document ${idx + 1}`;
+                    const isVerified = doc.verification_status === 'VERIFIED' || doc.verified;
+                    return (
+                      <div
+                        key={doc.id || doc.application_document_id || idx}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.6rem',
+                          padding: '0.6rem 0.85rem',
+                          background: 'rgba(255, 255, 255, 0.04)',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-subtle)',
+                        }}
+                      >
+                        <FileText size={16} color="#06B6D4" />
+                        <div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500 }}>{fileName}</div>
+                          <div style={{ fontSize: '0.7rem', color: isVerified ? '#34D399' : 'var(--text-muted)' }}>{doc.mime_type || doc.size || ''} · {isVerified ? '✓ Verified' : 'Pending Verification'}</div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+                  {documents.length === 0 && (selectedApp.documents?.length || 0) === 0 && (
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>No documents uploaded yet.</span>
+                  )}
                 </div>
               </div>
+
+              {/* Withdraw action */}
+              {canWithdraw && (
+                <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '1rem', marginTop: '0.5rem' }}>
+                  <button
+                    onClick={handleWithdraw}
+                    disabled={withdrawing}
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      borderRadius: 'var(--radius-md)',
+                      color: '#FCA5A5',
+                      padding: '0.5rem 1rem',
+                      fontSize: '0.85rem',
+                      cursor: withdrawing ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                    }}
+                  >
+                    <X size={14} /> {withdrawing ? 'Withdrawing...' : 'Withdraw Application'}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="glass-panel" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -431,9 +540,7 @@ export default function StudentDashboard({ onBrowseScholarships }) {
 
             <form onSubmit={handleSaveProfile} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
-                  Phone Number
-                </label>
+                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>Phone Number</label>
                 <input
                   type="text"
                   value={phone}
@@ -443,9 +550,7 @@ export default function StudentDashboard({ onBrowseScholarships }) {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
-                  Cumulative CGPA (out of 10.0)
-                </label>
+                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>Cumulative CGPA (out of 10.0)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -458,9 +563,7 @@ export default function StudentDashboard({ onBrowseScholarships }) {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
-                  Family Annual Income (₹)
-                </label>
+                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>Family Annual Income (₹)</label>
                 <input
                   type="number"
                   value={income}
@@ -470,9 +573,7 @@ export default function StudentDashboard({ onBrowseScholarships }) {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
-                  Social Category
-                </label>
+                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>Social Category</label>
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
@@ -487,9 +588,7 @@ export default function StudentDashboard({ onBrowseScholarships }) {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
-                  Degree Course / Branch
-                </label>
+                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>Degree Course / Branch</label>
                 <input
                   type="text"
                   placeholder="e.g. B.Tech Computer Science"
@@ -500,9 +599,7 @@ export default function StudentDashboard({ onBrowseScholarships }) {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
-                  State of Domicile
-                </label>
+                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>State of Domicile</label>
                 <input
                   type="text"
                   placeholder="e.g. Karnataka"
@@ -513,12 +610,8 @@ export default function StudentDashboard({ onBrowseScholarships }) {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
-                <button type="button" onClick={() => setIsEditingProfile(false)} className="btn btn-secondary">
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Save Changes
-                </button>
+                <button type="button" onClick={() => setIsEditingProfile(false)} className="btn btn-secondary">Cancel</button>
+                <button type="submit" className="btn btn-primary">Save Changes</button>
               </div>
             </form>
           </div>

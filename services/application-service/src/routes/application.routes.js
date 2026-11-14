@@ -6,7 +6,9 @@ const authorize = require('../middleware/authorize');
 const validateRequest = require('../middleware/validate-request');
 const {
   submitApplicationSchema,
+  draftApplicationSchema,
   updateApplicationSchema,
+  saveAnswersSchema,
   updateStatusSchema,
   withdrawApplicationSchema,
   queryApplicationsSchema,
@@ -15,12 +17,53 @@ const {
 // All application routes require authentication
 router.use(authenticate);
 
-// Student submits an application
+// Student submits a new application (DRAFT or SUBMITTED)
 router.post(
   '/',
   authorize('student'),
   validateRequest(submitApplicationSchema, 'body'),
   ApplicationController.submitApplication
+);
+
+// Student creates a draft application explicitly
+router.post(
+  '/draft',
+  authorize('student'),
+  validateRequest(draftApplicationSchema, 'body'),
+  ApplicationController.createDraft
+);
+
+// Student submits an existing draft application
+router.post(
+  '/:id/submit',
+  authorize('student'),
+  ApplicationController.submitDraft
+);
+
+// Student saves dynamic form answers
+router.post(
+  '/:id/answers',
+  authorize('student'),
+  validateRequest(saveAnswersSchema, 'body'),
+  ApplicationController.saveAnswers
+);
+
+// Retrieve saved form answers
+router.get(
+  '/:id/answers',
+  ApplicationController.getAnswers
+);
+
+// Retrieve document requirements snapshot
+router.get(
+  '/:id/requirements',
+  ApplicationController.getRequirements
+);
+
+// Retrieve application audit log trail
+router.get(
+  '/:id/audit-logs',
+  ApplicationController.getAuditLogs
 );
 
 // Get logged-in student's applications
@@ -52,8 +95,9 @@ router.get('/health', (req, res) => res.json({ status: 'healthy', route: '/api/v
 // Application Details
 router.get('/:id', ApplicationController.getApplicationById);
 
-// Application Progress & Tracking
+// Application Progress & Tracking (supports both /track and /tracking)
 router.get('/:id/track', ApplicationController.trackApplication);
+router.get('/:id/tracking', ApplicationController.trackApplication);
 
 // Application Status History
 router.get('/:id/status-history', ApplicationController.getStatusHistory);
@@ -84,4 +128,3 @@ router.patch(
 );
 
 module.exports = router;
-

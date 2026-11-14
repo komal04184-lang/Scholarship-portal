@@ -13,7 +13,7 @@ const {
   verifyDocumentSchema,
 } = require('../validators/document.validator');
 
-// Multer Storage Configuration
+// Multer Storage Configuration (Local storage destination)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, env.upload.dir);
@@ -56,7 +56,15 @@ router.post(
   DocumentController.uploadDocument
 );
 
-// List all documents for an application
+// Replace uploaded document attachment
+router.put(
+  '/:id/documents/:documentId',
+  authorize('student', 'admin'),
+  upload.single('document'),
+  DocumentController.replaceDocument
+);
+
+// List all active documents for an application
 router.get(
   '/:id/documents',
   DocumentController.getDocuments
@@ -68,7 +76,7 @@ router.get(
   DocumentController.getDocumentById
 );
 
-// Secure document download
+// Secure authorized document download / preview
 router.get(
   '/:id/documents/:documentId/download',
   DocumentController.downloadDocument
@@ -90,4 +98,3 @@ router.delete(
 );
 
 module.exports = router;
-

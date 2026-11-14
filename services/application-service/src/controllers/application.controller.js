@@ -1,16 +1,93 @@
 const ApplicationService = require('../services/application.service');
 const StatusRepository = require('../repositories/status.repository');
+const AuditRepository = require('../repositories/audit.repository');
+const RequirementRepository = require('../repositories/requirement.repository');
 const ApiResponse = require('../utils/api-response');
 
 class ApplicationController {
   /**
-   * POST /api/v1/applications
+   * POST /api/v1/applications (Submit or Draft based on body.status)
    */
   static async submitApplication(req, res, next) {
     try {
       const idempotencyKey = req.headers['idempotency-key'] || null;
       const result = await ApplicationService.submitApplication(req.user, req.body, idempotencyKey);
-      return ApiResponse.created(res, 'Application submitted successfully', result.body);
+      return ApiResponse.created(res, 'Application created successfully', result.body);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * POST /api/v1/applications/draft (Explicit Draft creation)
+   */
+  static async createDraft(req, res, next) {
+    try {
+      const result = await ApplicationService.createDraft(req.user, req.body);
+      return ApiResponse.created(res, 'Application draft created successfully', result.body);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * POST /api/v1/applications/:id/submit (Submit draft)
+   */
+  static async submitDraft(req, res, next) {
+    try {
+      const result = await ApplicationService.submitDraft(req.params.id, req.user);
+      return ApiResponse.success(res, 'Application submitted successfully', result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * POST /api/v1/applications/:id/answers (Save dynamic form answers)
+   */
+  static async saveAnswers(req, res, next) {
+    try {
+      const answers = req.body.answers || [];
+      const saved = await ApplicationService.saveFormAnswers(req.params.id, req.user, answers);
+      return ApiResponse.success(res, 'Form answers saved successfully', { answers: saved });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * GET /api/v1/applications/:id/answers (Retrieve saved form answers)
+   */
+  static async getAnswers(req, res, next) {
+    try {
+      const answers = await ApplicationService.getFormAnswers(req.params.id, req.user);
+      return ApiResponse.success(res, 'Form answers retrieved successfully', { answers });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * GET /api/v1/applications/:id/requirements (Retrieve document requirements snapshot)
+   */
+  static async getRequirements(req, res, next) {
+    try {
+      await ApplicationService.getApplicationById(req.params.id, req.user);
+      const requirements = await RequirementRepository.getByApplicationId(req.params.id);
+      return ApiResponse.success(res, 'Document requirements retrieved successfully', { requirements });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * GET /api/v1/applications/:id/audit-logs (Retrieve audit log trail)
+   */
+  static async getAuditLogs(req, res, next) {
+    try {
+      await ApplicationService.getApplicationById(req.params.id, req.user);
+      const auditLogs = await AuditRepository.getByApplicationId(req.params.id);
+      return ApiResponse.success(res, 'Audit logs retrieved successfully', { auditLogs });
     } catch (err) {
       next(err);
     }
@@ -21,7 +98,6 @@ class ApplicationController {
    */
   static async getMyApplications(req, res, next) {
     try {
-      // If user is admin/reviewer and accessed the base route without /my, forward to getAllApplications
       if (req.user.role !== 'student' && !req.path.includes('/my')) {
         return ApplicationController.getAllApplications(req, res, next);
       }
@@ -75,7 +151,6 @@ class ApplicationController {
    */
   static async getStatusHistory(req, res, next) {
     try {
-      // Ensure ownership or admin access
       await ApplicationService.getApplicationById(req.params.id, req.user);
       const history = await StatusRepository.getByApplicationId(req.params.id);
       return ApiResponse.success(res, 'Status history retrieved successfully', { history });
@@ -85,7 +160,7 @@ class ApplicationController {
   }
 
   /**
-   * GET /api/v1/applications/:id/track
+   * GET /api/v1/applications/:id/track (and /tracking)
    */
   static async trackApplication(req, res, next) {
     try {
@@ -119,7 +194,7 @@ class ApplicationController {
    */
   static async getAllApplications(req, res, next) {
     try {
-      const { status, scholarship_id, page = 1, limit = 10, sort = 'DESC' } = req.query;
+      const { status, scholarship_id, page = 1, limit = 20, sort = 'DESC' } = req.query;
       const offset = (parseInt(page, 10) - 1) * parseInt(limit, 10);
 
       const result = await ApplicationService.getAllApplications(
@@ -140,4 +215,3 @@ class ApplicationController {
 }
 
 module.exports = ApplicationController;
-

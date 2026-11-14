@@ -5,28 +5,23 @@ const env = {
   port: parseInt(process.env.PORT, 10) || 3003,
   nodeEnv: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
-  
+
   postgres: {
     connectionString: process.env.DATABASE_URL || null,
-    host: process.env.PGHOST || 'localhost',
-    port: parseInt(process.env.PGPORT, 10) || 5432,
-    database: process.env.PGDATABASE || 'scholarship_portal',
-    user: process.env.PGUSER || 'postgres',
-    password: process.env.PGPASSWORD || 'Kom@l007',
+    host: process.env.DB_HOST || process.env.PGHOST || 'localhost',
+    port: parseInt(process.env.DB_PORT || process.env.PGPORT, 10) || 5432,
+    database: process.env.DB_NAME || process.env.PGDATABASE || 'application_db',
+    user: process.env.DB_USER || process.env.PGUSER || 'postgres',
+    password: process.env.DB_PASSWORD || process.env.PGPASSWORD || 'Kom@l007',
     schema: process.env.PG_SCHEMA || 'public',
     max: parseInt(process.env.PG_POOL_MAX, 10) || 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
   },
 
-  mongodb: {
-    uri: process.env.MONGODB_URI || 'mongodb://localhost:27017',
-    database: process.env.MONGODB_DATABASE || 'scholarship_documents',
-  },
-
   services: {
     identityServiceUrl: process.env.IDENTITY_SERVICE_URL || process.env.STUDENT_SERVICE_URL || 'http://localhost:3001',
-    scholarshipServiceUrl: process.env.SCHOLARSHIP_SERVICE_URL || 'http://localhost:3002',
+    scholarshipServiceUrl: process.env.SCHOLARSHIP_SERVICE_URL || 'http://localhost:3000',
     reviewServiceUrl: process.env.REVIEW_SERVICE_URL || 'http://localhost:3004',
     paymentServiceUrl: process.env.PAYMENT_SERVICE_URL || 'http://localhost:3005',
     serviceToServiceSecret: process.env.SERVICE_TO_SERVICE_SECRET || 'internal_super_secret_token_change_in_prod',
@@ -54,4 +49,3 @@ const env = {
 };
 
 module.exports = env;
-

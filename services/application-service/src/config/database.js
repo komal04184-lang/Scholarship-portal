@@ -1,8 +1,7 @@
 const { Pool } = require('pg');
-const { MongoClient } = require('mongodb');
 const env = require('./env');
 
-// 1. PostgreSQL Connection Pool
+// Independent PostgreSQL Connection Pool for application_db
 const poolConfig = env.postgres.connectionString
   ? { connectionString: env.postgres.connectionString }
   : {
@@ -19,7 +18,7 @@ const poolConfig = env.postgres.connectionString
 const pool = new Pool(poolConfig);
 
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle PostgreSQL client:', err.message);
+  console.error('Unexpected error on idle PostgreSQL client in application_db pool:', err.message);
 });
 
 async function query(text, params) {
@@ -33,47 +32,34 @@ async function getClient() {
   return client;
 }
 
-// 2. MongoDB Native Client (for application snapshots and document metadata)
-let mongoClient = null;
-let mongoDb = null;
-
-async function connectMongo() {
-  if (mongoDb) return mongoDb;
+async function testConnection() {
   try {
-    mongoClient = new MongoClient(env.mongodb.uri, {
-      serverSelectionTimeoutMS: 3000,
-      connectTimeoutMS: 3000,
-    });
-    await mongoClient.connect();
-    mongoDb = mongoClient.db(env.mongodb.database);
-    console.log(`✓ Connected to MongoDB database: ${env.mongodb.database}`);
-    return mongoDb;
+    const res = await pool.query('SELECT current_database(), current_user, version(), NOW() as current_time');
+    return {
+      connected: true,
+      database: res.rows[0].current_database,
+      user: res.rows[0].current_user,
+      time: res.rows[0].current_time,
+    };
   } catch (err) {
-    console.warn(`⚠️ MongoDB connection warning (Service will operate with PostgreSQL primary): ${err.message}`);
-    return null;
+    return {
+      connected: false,
+      database: env.postgres.database,
+      error: err.message,
+    };
   }
-}
-
-function getMongoDb() {
-  return mongoDb;
 }
 
 async function closeConnections() {
   try {
     await pool.end();
   } catch (e) {}
-  if (mongoClient) {
-    try {
-      await mongoClient.close();
-    } catch (e) {}
-  }
 }
 
 module.exports = {
   pool,
   query,
   getClient,
-  connectMongo,
-  getMongoDb,
+  testConnection,
   closeConnections,
 };
