@@ -12,19 +12,22 @@ class EligibilityService {
     const scholarship = await ScholarshipClient.getScholarship(scholarshipId);
 
     // 1. Verify scholarship active status
-    if (scholarship.status && scholarship.status.toUpperCase() !== 'ACTIVE') {
-      const err = new Error(`Scholarship '${scholarship.name || scholarshipId}' is currently inactive.`);
+    const status = String(scholarship.status || '').toUpperCase();
+    const activeStatuses = ['ACTIVE', 'OPEN', 'PUBLISHED'];
+    if (status && !activeStatuses.includes(status)) {
+      const err = new Error(`Scholarship '${scholarship.name || scholarship.title || scholarshipId}' is currently inactive (${scholarship.status}).`);
       err.statusCode = 400;
       err.errorCode = 'SCHOLARSHIP_INACTIVE';
       throw err;
     }
 
     // 2. Verify application deadline
-    if (scholarship.deadline) {
-      const deadlineDate = new Date(scholarship.deadline);
+    const deadlineStr = scholarship.deadline || scholarship.application_end_date;
+    if (deadlineStr) {
+      const deadlineDate = new Date(deadlineStr);
       const now = new Date();
       if (!isNaN(deadlineDate.getTime()) && deadlineDate < now) {
-        const err = new Error(`The application deadline for '${scholarship.name || scholarshipId}' has passed (${scholarship.deadline}).`);
+        const err = new Error(`The application deadline for '${scholarship.name || scholarship.title || scholarshipId}' has passed (${deadlineStr}).`);
         err.statusCode = 400;
         err.errorCode = 'SCHOLARSHIP_DEADLINE_EXPIRED';
         throw err;
@@ -32,14 +35,14 @@ class EligibilityService {
     }
 
     // 3. Verify student eligibility criteria if provided
-    if (studentProfile && scholarship.eligibility_criteria) {
-      const criteria = scholarship.eligibility_criteria;
-
-      // Income limit check
-      if (criteria.max_family_income && studentProfile.family_income) {
-        if (Number(studentProfile.family_income) > Number(criteria.max_family_income)) {
+    if (studentProfile) {
+      // Income check
+      const maxIncome = scholarship.max_income ?? scholarship.eligibility_criteria?.max_family_income;
+      const studentIncome = studentProfile.family_income ?? studentProfile.annual_income ?? studentProfile.income;
+      if (maxIncome !== null && maxIncome !== undefined && studentIncome !== null && studentIncome !== undefined) {
+        if (Number(studentIncome) > Number(maxIncome)) {
           const err = new Error(
-            `Applicant family income (${studentProfile.family_income}) exceeds scholarship threshold (${criteria.max_family_income}).`
+            `Applicant family income (₹${studentIncome}) exceeds scholarship threshold of ₹${maxIncome}.`
           );
           err.statusCode = 400;
           err.errorCode = 'INCOME_ELIGIBILITY_EXCEEDED';
@@ -47,14 +50,30 @@ class EligibilityService {
         }
       }
 
-      // Minimum percentage check
-      if (criteria.min_marks_percentage && studentProfile.academic_details?.marks_percentage) {
-        if (Number(studentProfile.academic_details.marks_percentage) < Number(criteria.min_marks_percentage)) {
+      // Minimum academic performance check
+      const minPercentage = scholarship.min_percentage ?? scholarship.eligibility_criteria?.min_marks_percentage;
+      const minCgpa = scholarship.min_cgpa ?? scholarship.eligibility_criteria?.min_cgpa;
+      const studentMarks = studentProfile.academic_details?.marks_percentage ?? studentProfile.marks_percentage ?? studentProfile.percentage;
+      const studentCgpa = studentProfile.academic_details?.cgpa ?? studentProfile.cgpa;
+
+      if (minPercentage !== null && minPercentage !== undefined && studentMarks !== null && studentMarks !== undefined) {
+        if (Number(studentMarks) < Number(minPercentage)) {
           const err = new Error(
-            `Academic marks (${studentProfile.academic_details.marks_percentage}%) do not meet minimum required (${criteria.min_marks_percentage}%).`
+            `Academic marks (${studentMarks}%) do not meet minimum required percentage (${minPercentage}%).`
           );
           err.statusCode = 400;
           err.errorCode = 'ACADEMIC_ELIGIBILITY_NOT_MET';
+          throw err;
+        }
+      }
+
+      if (minCgpa !== null && minCgpa !== undefined && studentCgpa !== null && studentCgpa !== undefined) {
+        if (Number(studentCgpa) < Number(minCgpa)) {
+          const err = new Error(
+            `CGPA (${studentCgpa}) does not meet minimum required CGPA (${minCgpa}).`
+          );
+          err.statusCode = 400;
+          err.errorCode = 'CGPA_ELIGIBILITY_NOT_MET';
           throw err;
         }
       }
@@ -68,4 +87,3 @@ class EligibilityService {
 }
 
 module.exports = EligibilityService;
-

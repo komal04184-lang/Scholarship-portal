@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  # Databases
+  postgres:
+    image: postgres:18-alpine
+    container_name: apexscholar_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: local_environment_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  mongodb:
+    image: mongo:7.0
+    container_name: apexscholar_mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+
+  # Microservices
+  identity-service:
+    build:
+      context: ./services/identity_student_service/backend
+      dockerfile: Dockerfile
+    container_name: apexscholar_identity
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: identity_db
+      DB_USER: postgres
+      DB_PASSWORD: local_environment_password
+      JWT_SECRET: dev_jwt_secret_change_in_production_k9x2m4p7
+    depends_on:
+      - postgres
+
+  scholarship-service:
+    build:
+      context: ./services/scholarship-service
+      dockerfile: Dockerfile
+    container_name: apexscholar_scholarship
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+      DATABASE_URL: postgresql://postgres:local_environment_password@postgres:5432/scholarship_db
+      JWT_SECRET: dev_jwt_secret_change_in_production_k9x2m4p7
+    depends_on:
+      - postgres
+
+  application-service:
+    build:
+      context: ./services/application-service
+      dockerfile: Dockerfile
+    container_name: apexscholar_application
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: application_db
+      DB_USER: postgres
+      DB_PASSWORD: local_environment_password
+      MONGODB_URI: mongodb://mongodb:27017
+      MONGODB_DATABASE: scholarship_documents
+      JWT_SECRET: dev_jwt_secret_change_in_production_k9x2m4p7
+    depends_on:
+      - postgres
+      - mongodb
+
+  review-service:
+    build:
+      context: ./services/review-service
+      dockerfile: Dockerfile
+    container_name: apexscholar_review
+    ports:
+      - "3004:3004"
+    environment:
+      PORT: 3004
+      DATABASE_URL: postgresql://postgres:local_environment_password@postgres:5432/review_db
+      JWT_SECRET: dev_jwt_secret_change_in_production_k9x2m4p7
+      APPLICATION_SERVICE_URL: http://application-service:3003
+    depends_on:
+      - postgres
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: apexscholar_gateway
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      IDENTITY_SERVICE_URL: http://identity-service:3001
+      SCHOLARSHIP_SERVICE_URL: http://scholarship-service:3002
+      APPLICATION_SERVICE_URL: http://application-service:3003
+      REVIEW_SERVICE_URL: http://review-service:3004
+      CORS_ORIGIN: http://localhost:5173
+    depends_on:
+      - identity-service
+      - scholarship-service
+      - application-service
+      - review-service
+
+  # React Frontend Client
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: apexscholar_client
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api-gateway
+
+volumes:
+  pgdata:
+  mongodata:

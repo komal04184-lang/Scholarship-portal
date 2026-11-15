@@ -4,12 +4,14 @@ import Navbar from './components/Navbar';
 import CatalogView from './views/CatalogView';
 import StudentDashboard from './views/StudentDashboard';
 import AdminDashboard from './views/AdminDashboard';
+import ReviewerDashboard from './views/ReviewerDashboard';
 import AuthModal from './views/AuthModal';
 import { GraduationCap, ShieldCheck, Database, Server, Code, Lock, User } from 'lucide-react';
 
 function MainApp() {
   const { user, role, isAdmin, isStudent, isAuthenticated } = useAuth();
-  const [activeTab, setActiveTab] = useState('catalog'); // 'catalog', 'student', 'admin'
+  const isReviewer = role === 'reviewer';
+  const [activeTab, setActiveTab] = useState('catalog'); // 'catalog', 'student', 'admin', 'reviewer'
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authDefaultTab, setAuthDefaultTab] = useState('choose');
   const [authTargetTab, setAuthTargetTab] = useState(null);
@@ -105,9 +107,29 @@ function MainApp() {
           )
         )}
 
+        {/* Reviewer Dashboard */}
+        {activeTab === 'reviewer' && (
+          isAuthenticated && (isReviewer || isAdmin) ? (
+            <ReviewerDashboard user={user} />
+          ) : (
+            <div style={{ maxWidth: '520px', margin: '4rem auto', padding: '2.5rem', textAlign: 'center',
+              background: '#FFFFFF', borderRadius: '16px', border: '1px solid #E2E8F0' }}>
+              <h2>Reviewer Sign In Required</h2>
+              <p>Please sign in with reviewer credentials.</p>
+              <button onClick={() => openAuth('admin', 'reviewer')} className="btn btn-primary">
+                Sign In as Reviewer
+              </button>
+            </div>
+          )
+        )}
+
         {activeTab === 'admin' && (
           isAuthenticated && isAdmin ? (
-            <AdminDashboard user={user} />
+            isReviewer ? (
+              <ReviewerDashboard user={user} />
+            ) : (
+              <AdminDashboard user={user} />
+            )
           ) : (
             <div style={{
               maxWidth: '520px',
@@ -199,21 +221,12 @@ function MainApp() {
             </p>
           </div>
 
-          {/* Architecture badges */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.75rem', color: '#64748B', marginRight: '0.4rem' }}>Backend:</span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, padding: '0.2rem 0.55rem', borderRadius: '4px', background: '#F1F5F9', color: '#334155', border: '1px solid #E2E8F0' }}>
-              PostgreSQL
-            </span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, padding: '0.2rem 0.55rem', borderRadius: '4px', background: '#F1F5F9', color: '#334155', border: '1px solid #E2E8F0' }}>
-              Node.js Express
-            </span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, padding: '0.2rem 0.55rem', borderRadius: '4px', background: '#F1F5F9', color: '#334155', border: '1px solid #E2E8F0' }}>
-              SOAP & REST
-            </span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, padding: '0.2rem 0.55rem', borderRadius: '4px', background: '#F1F5F9', color: '#334155', border: '1px solid #E2E8F0' }}>
-              React + Vite
-            </span>
+          {/* Helpful portal links */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', alignItems: 'center' }}>
+            <button onClick={() => setActiveTab('catalog')} style={{ background: 'none', border: 'none', color: '#475569', fontSize: '0.85rem', cursor: 'pointer', padding: 0 }}>Browse Scholarships</button>
+            <button onClick={() => setActiveTab('catalog')} style={{ background: 'none', border: 'none', color: '#475569', fontSize: '0.85rem', cursor: 'pointer', padding: 0 }}>Eligibility Criteria</button>
+            <button onClick={() => setActiveTab('catalog')} style={{ background: 'none', border: 'none', color: '#475569', fontSize: '0.85rem', cursor: 'pointer', padding: 0 }}>Guidelines</button>
+            <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Support: helpdesk@scholarship.gov.in</span>
           </div>
         </div>
 
@@ -229,11 +242,11 @@ function MainApp() {
           fontSize: '0.8rem',
           color: '#94A3B8',
         }}>
-          <div>© 2026 ApexScholar Portal. All rights reserved.</div>
+          <div>© 2026 ApexScholar Portal. All rights reserved. Online Higher Education Scholarship Management System.</div>
           <div style={{ display: 'flex', gap: '1.5rem' }}>
-            <span>Security: JWT Bearer & RBAC</span>
-            <span>REST API v1: /api/v1</span>
-            <span>Database: Connected</span>
+            <span>Digital Portal</span>
+            <span>Privacy Policy</span>
+            <span>Terms of Service</span>
           </div>
         </div>
       </footer>

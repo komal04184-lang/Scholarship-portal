@@ -29,7 +29,7 @@ class ScholarshipClient {
               'Accept': 'application/json',
               'X-Service-Token': env.services.serviceToServiceSecret,
             },
-            timeout: 2500,
+            timeout: 5000,
           },
           (res) => {
             let data = '';
@@ -61,47 +61,27 @@ class ScholarshipClient {
 
         req.on('timeout', () => {
           req.destroy();
-          if (env.services.fallbackEligibilityCheck) {
-            logger.warn(`Scholarship Service timed out; applying resilient fallback for scholarship ${scholarshipId}`);
-            return resolve(ScholarshipClient._getFallbackScholarship(scholarshipId));
-          }
-          const err = new Error('Scholarship Service request timed out.');
+          const err = new Error(`Scholarship Service request timed out for scholarship ${scholarshipId}.`);
           err.statusCode = 504;
+          err.errorCode = 'GATEWAY_TIMEOUT';
+          logger.error('Scholarship Service timed out', { scholarshipId });
           return reject(err);
         });
 
         req.on('error', (err) => {
-          if (env.services.fallbackEligibilityCheck) {
-            logger.warn(`Scholarship Service unreachable (${err.message}); applying resilient fallback for scholarship ${scholarshipId}`);
-            return resolve(ScholarshipClient._getFallbackScholarship(scholarshipId));
-          }
           const error = new Error(`Scholarship Service unavailable: ${err.message}`);
           error.statusCode = 503;
+          error.errorCode = 'SERVICE_UNAVAILABLE';
+          logger.error('Scholarship Service error', { error: err.message, scholarshipId });
           return reject(error);
         });
 
         req.end();
       } catch (err) {
-        if (env.services.fallbackEligibilityCheck) {
-          return resolve(ScholarshipClient._getFallbackScholarship(scholarshipId));
-        }
         reject(err);
       }
     });
   }
-
-  static _getFallbackScholarship(id) {
-    return {
-      scholarship_id: id,
-      name: `Scholarship Program #${id}`,
-      amount: '50000.00',
-      status: 'ACTIVE',
-      deadline: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
-      academic_year: '2026-2027',
-      fallback: true,
-    };
-  }
 }
 
 module.exports = ScholarshipClient;
-

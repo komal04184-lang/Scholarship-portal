@@ -44,12 +44,16 @@ const upload = multer({
   fileFilter,
 });
 
+const createLocalRateLimiter = require('../middleware/localRateLimiter');
+const documentActionLimiter = createLocalRateLimiter(60000, 30, 'Document upload limit reached. Please wait a moment.');
+
 // All document routes require authentication
 router.use(authenticate);
 
 // Upload document attachment for an application
 router.post(
   '/:id/documents',
+  documentActionLimiter,
   authorize('student', 'admin'),
   upload.single('document'),
   validateRequest(uploadDocumentSchema, 'body'),

@@ -1,20 +1,24 @@
 {
   "name": "scholarship-service",
   "version": "1.0.0",
-  "description": "Scholarship microservice for Scholarship Portal",
+  "description": "Scholarship microservice for ApexScholar Portal",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "test": "node --test tests/scholarship.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
+    "graphql": "^16.9.0",
     "helmet": "^8.0.0",
+    "js-yaml": "^4.1.0",
     "jsonwebtoken": "^9.0.2",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"

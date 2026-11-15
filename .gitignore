@@ -38,3 +38,7 @@ scholarship-portal-backend/uploads/
 
 # Empty root npm lock file
 /package-lock.json
+
+# Local PostgreSQL cluster
+pgdata/
+pg_log.txt

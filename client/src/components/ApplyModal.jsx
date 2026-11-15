@@ -283,28 +283,134 @@ export default function ApplyModal({ scholarship, user, onClose, onSuccess }) {
         {step === 3 && (
           <div>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-              Upload verification documents (PDF, JPG, PNG). Files are stored securely in MongoDB GridFS / secure repository.
+              Upload required verification documents (PDF, JPG, PNG). Files are stored securely in MongoDB GridFS and PostgreSQL records.
             </p>
 
-            {/* Upload Dropzone */}
+            {/* Document Requirements Table */}
+            <div style={{
+              background: 'rgba(15, 23, 42, 0.6)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border-subtle)',
+              overflow: 'hidden',
+              marginBottom: '1.25rem',
+            }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                <thead>
+                  <tr style={{ background: 'rgba(255, 255, 255, 0.04)', borderBottom: '1px solid var(--border-subtle)' }}>
+                    <th style={{ padding: '0.65rem 0.85rem', color: 'var(--text-muted)', fontWeight: 600, width: '50px' }}>S.No.</th>
+                    <th style={{ padding: '0.65rem 0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Document Type</th>
+                    <th style={{ padding: '0.65rem 0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>View Document</th>
+                    <th style={{ padding: '0.65rem 0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Status</th>
+                    <th style={{ padding: '0.65rem 0.85rem', color: 'var(--text-muted)', fontWeight: 600, textAlign: 'right' }}>Action / Upload</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(scholarship.required_documents && scholarship.required_documents.length > 0
+                    ? scholarship.required_documents.map((d) => (typeof d === 'string' ? { name: d } : { name: d.document_name || d.name || 'Certificate' }))
+                    : [
+                        { name: 'Income Certificate' },
+                        { name: 'Previous Semester Grade Sheet' },
+                        { name: 'College Identity Card' },
+                      ]
+                  ).map((doc, idx) => {
+                    const matchedFile = files[idx];
+                    return (
+                      <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '0.65rem 0.85rem', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                        <td style={{ padding: '0.65rem 0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {doc.name}
+                        </td>
+                        <td style={{ padding: '0.65rem 0.85rem', color: 'var(--text-secondary)' }}>
+                          {matchedFile ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: '#38BDF8' }}>
+                              <FileText size={14} /> {matchedFile.name.slice(0, 18)}...
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Not attached</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.65rem 0.85rem' }}>
+                          {matchedFile ? (
+                            <span style={{
+                              padding: '0.2rem 0.5rem',
+                              borderRadius: '4px',
+                              background: 'rgba(16, 185, 129, 0.15)',
+                              color: '#34D399',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                            }}>
+                              Ready to Upload
+                            </span>
+                          ) : (
+                            <span style={{
+                              padding: '0.2rem 0.5rem',
+                              borderRadius: '4px',
+                              background: 'rgba(245, 158, 11, 0.15)',
+                              color: '#FBBF24',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                            }}>
+                              Pending
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.65rem 0.85rem', textAlign: 'right' }}>
+                          <label style={{
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            padding: '0.35rem 0.65rem',
+                            borderRadius: '4px',
+                            background: matchedFile ? 'rgba(255, 255, 255, 0.08)' : 'var(--accent-primary)',
+                            color: '#fff',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                          }}>
+                            <Upload size={13} /> {matchedFile ? 'Replace' : 'Upload'}
+                            <input
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  const newFile = e.target.files[0];
+                                  setFiles((prev) => {
+                                    const next = [...prev];
+                                    next[idx] = newFile;
+                                    return next;
+                                  });
+                                }
+                              }}
+                            />
+                          </label>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* General Upload Dropzone for Additional Supporting Documents */}
             <div
               style={{
                 border: '2px dashed var(--border-medium)',
                 borderRadius: 'var(--radius-md)',
-                padding: '2rem 1.5rem',
+                padding: '1.25rem',
                 textAlign: 'center',
-                background: 'rgba(15, 23, 42, 0.4)',
+                background: 'rgba(15, 23, 42, 0.3)',
                 marginBottom: '1.25rem',
                 cursor: 'pointer',
               }}
               onClick={() => document.getElementById('file-input')?.click()}
             >
-              <Upload size={32} color="#818CF8" style={{ margin: '0 auto 0.75rem' }} />
-              <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
-                Click or drag files to upload
+              <Upload size={24} color="#818CF8" style={{ margin: '0 auto 0.4rem' }} />
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                Attach Additional Certificates / Letters (Optional)
               </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                Mark sheets, income certificates, faculty recommendations (Max 5MB each)
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                Max 5MB each. Supported: PDF, PNG, JPG
               </div>
               <input
                 id="file-input"
@@ -316,51 +422,27 @@ export default function ApplyModal({ scholarship, user, onClose, onSuccess }) {
               />
             </div>
 
-            {/* File list preview */}
-            {files.length > 0 && (
-              <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {files.map((f, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '0.6rem 0.85rem',
-                      background: 'rgba(255, 255, 255, 0.05)',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-subtle)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <FileText size={16} color="#06B6D4" />
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>{f.name}</span>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        ({Math.round(f.size / 1024)} KB)
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => removeFile(idx)}
-                      style={{ background: 'transparent', color: '#EF4444', padding: '2px' }}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
               <button onClick={() => setStep(2)} className="btn btn-secondary" disabled={submitting}>
                 <ArrowLeft size={16} /> Back
               </button>
-              <button
-                onClick={handleSubmit}
-                className="btn btn-primary"
-                disabled={submitting}
-              >
-                {submitting ? 'Submitting Application...' : 'Submit Final Application'}
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="btn btn-secondary"
+                  disabled={submitting}
+                >
+                  Save as Draft
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  className="btn btn-primary"
+                  disabled={submitting}
+                >
+                  {submitting ? 'Submitting Application...' : 'Submit Final Application'}
+                </button>
+              </div>
             </div>
           </div>
         )}

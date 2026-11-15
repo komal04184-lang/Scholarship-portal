@@ -11,5 +11,7 @@ pool.on("error", (error) => {
 
 module.exports = {
   query: (text, params) => pool.query(text, params),
-  getClient: () => pool.connect()
+  getClient: () => pool.connect(),
+  pool,
+  end: () => pool.end()
 };

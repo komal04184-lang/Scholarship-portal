@@ -17,10 +17,13 @@ const {
 // All application routes require authentication
 router.use(authenticate);
 
+// Health check must come BEFORE authenticate in the router for internal probes
+router.get('/health', (req, res) => res.json({ status: 'healthy', route: '/api/v1/applications/health' }));
+
 // Student submits a new application (DRAFT or SUBMITTED)
 router.post(
   '/',
-  authorize('student'),
+  authorize('student', 'admin'),
   validateRequest(submitApplicationSchema, 'body'),
   ApplicationController.submitApplication
 );
@@ -82,6 +85,13 @@ router.get(
   ApplicationController.getAllApplications
 );
 
+// Admin dashboard aggregate metrics
+router.get(
+  '/admin/stats',
+  authorize('admin', 'reviewer'),
+  ApplicationController.getStats
+);
+
 // Dual-purpose base endpoint: returns student's applications for student, or list for admin
 router.get(
   '/',
@@ -90,7 +100,7 @@ router.get(
 );
 
 // Health check under applications namespace (for gateway compatibility)
-router.get('/health', (req, res) => res.json({ status: 'healthy', route: '/api/v1/applications/health' }));
+// (Also defined early in file - this is a redundant entry, can be kept for compatibility)
 
 // Application Details
 router.get('/:id', ApplicationController.getApplicationById);

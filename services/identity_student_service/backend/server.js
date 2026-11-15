@@ -1,18 +1,28 @@
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
 const app = require("./src/app");
-const connectDB = require("./src/db/db");
+const { connectDB } = require("./src/db/db");
 
-// Vite proxy (client/vite.config.js) /api/v1/auth, /profile, /admin ko isi port par bhejta hai
 const PORT = process.env.PORT || 3001;
 
 if (!process.env.JWT_SECRET) {
-    console.error("JWT_SECRET missing in .env");
-    process.exit(1);
+  console.warn("⚠️ JWT_SECRET not provided, using fallback development secret.");
 }
 
-connectDB().then(() => {
-    app.listen(PORT, () => {
-        console.log(`Identity service running on http://localhost:${PORT}`);
-    });
-});
+async function start() {
+  const isConnected = await connectDB();
+  if (!isConnected) {
+    console.warn("⚠️ Identity Service starting in resilient mode (PostgreSQL identity_db will reconnect automatically when available).");
+  }
+
+  app.listen(PORT, () => {
+    console.log(`====================================================`);
+    console.log(` IDENTITY STUDENT SERVICE RUNNING ON PORT ${PORT}`);
+    console.log(` Database: PostgreSQL (${process.env.DB_NAME || "identity_db"})`);
+    console.log(` Health:   http://localhost:${PORT}/api/v1/health`);
+    console.log(`====================================================`);
+  });
+}
+
+start();

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+             xmlns:tns="http://apexscholar.local/eligibility"
+             xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+             name="EligibilityService"
+             targetNamespace="http://apexscholar.local/eligibility">
+  <types>
+    <xsd:schema targetNamespace="http://apexscholar.local/eligibility">
+      <xsd:element name="CheckEligibilityRequest">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="scholarshipId" type="xsd:string"/>
+            <xsd:element name="studentCgpa" type="xsd:decimal"/>
+            <xsd:element name="familyIncome" type="xsd:decimal"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+      <xsd:element name="CheckEligibilityResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="eligible" type="xsd:boolean"/>
+            <xsd:element name="reason" type="xsd:string"/>
+            <xsd:element name="scholarshipId" type="xsd:string"/>
+            <xsd:element name="checkedAt" type="xsd:dateTime"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+    </xsd:schema>
+  </types>
+  <message name="CheckEligibilityInput">
+    <part name="parameters" element="tns:CheckEligibilityRequest"/>
+  </message>
+  <message name="CheckEligibilityOutput">
+    <part name="parameters" element="tns:CheckEligibilityResponse"/>
+  </message>
+  <portType name="EligibilityPortType">
+    <operation name="CheckEligibility">
+      <input message="tns:CheckEligibilityInput"/>
+      <output message="tns:CheckEligibilityOutput"/>
+    </operation>
+  </portType>
+  <binding name="EligibilityBinding" type="tns:EligibilityPortType">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="CheckEligibility">
+      <soap:operation soapAction="http://apexscholar.local/eligibility/CheckEligibility"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+  </binding>
+  <service name="EligibilityService">
+    <documentation>Checks student eligibility for ApexScholar scholarships.</documentation>
+    <port name="EligibilityPort" binding="tns:EligibilityBinding">
+      <soap:address location="http://localhost:3002/soap/eligibility"/>
+    </port>
+  </service>
+</definitions>

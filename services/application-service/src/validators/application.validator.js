@@ -31,8 +31,11 @@ const submitApplicationSchema = Joi.object({
     course: Joi.string().trim(),
     branch: Joi.string().trim(),
     academic_year: Joi.string().trim(),
-    marks_percentage: Joi.number().min(0).max(100),
+    cgpa: Joi.number().min(0).max(10).optional(),
+    marks_percentage: Joi.number().min(0).max(100).optional(),
   }).optional(),
+  family_income: Joi.number().min(0).optional(),
+  annual_income: Joi.number().min(0).optional(),
   answers: Joi.array().items(
     Joi.object({
       section_key: Joi.string().trim().allow('', null),

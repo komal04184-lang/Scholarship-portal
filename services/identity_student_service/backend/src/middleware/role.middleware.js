@@ -1,18 +1,25 @@
 function allowRoles(...roles) {
+  const allowed = roles.map((r) => String(r).toLowerCase());
 
-    return function (req, res, next) {
+  return function (req, res, next) {
+    if (!req.user || !req.user.role) {
+      return res.status(401).json({
+        status: "error",
+        message: "Authentication required before role check.",
+      });
+    }
 
-        if (!roles.includes(req.user.role)) {
-            return res.status(403).json({
-                message: "Access denied"
-            });
-        }
+    const userRole = String(req.user.role).toLowerCase();
 
-        next();
-    };
+    if (!allowed.includes(userRole)) {
+      return res.status(403).json({
+        status: "error",
+        message: `Access denied. Requires one of roles: [${roles.join(", ")}]`,
+      });
+    }
+
+    next();
+  };
 }
-//req.user.role  JWT authentication middleware se aayega
-//Agar user ka role allowed hai toh API access milega
-//Agar role allowed nahi hai toh 403 Access denied response milega
 
 module.exports = allowRoles;

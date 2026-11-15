@@ -84,7 +84,8 @@ class DocumentController {
       const fileInfo = await DocumentService.getDownloadStream(req.params.documentId, req.user);
 
       res.setHeader('Content-Type', fileInfo.mimeType);
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileInfo.filename)}"`);
+      const disposition = (req.query.inline === 'true' || req.query.preview === 'true') ? 'inline' : 'attachment';
+      res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileInfo.filename)}"`);
       if (fileInfo.sizeBytes) {
         res.setHeader('Content-Length', fileInfo.sizeBytes);
       }
@@ -100,15 +101,16 @@ class DocumentController {
    */
   static async verifyDocument(req, res, next) {
     try {
-      const { verification_status, comment, reviewer_comment } = req.body;
+      const { verification_status, status, comment, reviewer_comment } = req.body;
+      const targetStatus = verification_status || status;
       const updated = await DocumentService.verifyDocument(
         req.params.documentId,
-        verification_status,
+        targetStatus,
         reviewer_comment || comment,
         req.user
       );
 
-      return ApiResponse.success(res, `Document verification updated to ${verification_status}`, {
+      return ApiResponse.success(res, `Document verification updated to ${targetStatus}`, {
         document: updated,
       });
     } catch (err) {

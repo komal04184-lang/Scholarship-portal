@@ -1,24 +1,40 @@
-const ALLOWED_CATEGORIES = ["Merit", "STEM", "Need-Based", "Research", "International"];
+const ALLOWED_CATEGORIES = [
+  "Merit",
+  "STEM",
+  "Need-Based",
+  "Research",
+  "International",
+  "Government",
+  "General"
+];
+
+function normalizeCategoryName(cat) {
+  if (!cat) return "";
+  return String(cat).toLowerCase().replace(/[\s_-]+/g, "");
+}
 
 function validateScholarship(body, partial = false) {
   const errors = [];
-  const required = ["name", "description", "category", "amount", "deadline"];
+  const name = body.name || body.title;
+  const amount = body.amount !== undefined ? body.amount : body.award_amount;
+  const deadline = body.deadline || body.application_end_date;
+  const category = body.category || body.category_name;
 
   if (!partial) {
-    for (const key of required) {
-      if (body[key] === undefined || body[key] === null || body[key] === "") {
-        errors.push(`${key} is required`);
-      }
-    }
+    if (!name) errors.push("name or title is required");
+    if (!body.description) errors.push("description is required");
+    if (!category) errors.push("category is required");
+    if (amount === undefined || amount === null || amount === "") errors.push("amount or award_amount is required");
+    if (!deadline) errors.push("deadline or application_end_date is required");
   }
 
-  if (body.name !== undefined && (typeof body.name !== "string" || body.name.trim().length < 3)) {
-    errors.push("name must contain at least 3 characters");
+  if (name !== undefined && (typeof name !== "string" || name.trim().length < 3)) {
+    errors.push("name/title must contain at least 3 characters");
   }
-  if (body.category !== undefined && !ALLOWED_CATEGORIES.includes(body.category)) {
+  if (category !== undefined && !ALLOWED_CATEGORIES.some(c => normalizeCategoryName(c) === normalizeCategoryName(category))) {
     errors.push(`category must be one of: ${ALLOWED_CATEGORIES.join(", ")}`);
   }
-  if (body.amount !== undefined && (!Number.isFinite(Number(body.amount)) || Number(body.amount) <= 0)) {
+  if (amount !== undefined && (!Number.isFinite(Number(amount)) || Number(amount) <= 0)) {
     errors.push("amount must be a positive number");
   }
   if (body.min_cgpa !== undefined && body.min_cgpa !== null &&
@@ -29,7 +45,7 @@ function validateScholarship(body, partial = false) {
       (!Number.isFinite(Number(body.max_income)) || Number(body.max_income) < 0)) {
     errors.push("max_income must be zero or a positive number");
   }
-  if (body.deadline !== undefined && Number.isNaN(Date.parse(body.deadline))) {
+  if (deadline !== undefined && Number.isNaN(Date.parse(deadline))) {
     errors.push("deadline must be a valid date");
   }
   if (body.total_slots !== undefined && body.total_slots !== null &&

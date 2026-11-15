@@ -22,7 +22,7 @@ if (!fs.existsSync(env.upload.dir)) {
 }
 
 // Security & Parsing Middlewares
-app.use(helmet());
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
   origin: true,
   credentials: true,
@@ -31,8 +31,30 @@ app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Correlation ID middleware
+app.use((req, res, next) => {
+  const correlationId = req.headers['x-correlation-id'] || `app-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  req.correlationId = correlationId;
+  res.setHeader('X-Correlation-ID', correlationId);
+  next();
+});
+
 if (!env.isProduction) {
   app.use(morgan('dev'));
+}
+
+// Swagger UI (optional)
+try {
+  const swaggerUi = require('swagger-ui-express');
+  const yaml = require('js-yaml');
+  const swaggerPath = path.join(__dirname, '../docs/openapi.yaml');
+  if (fs.existsSync(swaggerPath)) {
+    const swaggerDoc = yaml.load(fs.readFileSync(swaggerPath, 'utf8'));
+    app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc));
+    console.log('[application-service] Swagger UI: /api-docs');
+  }
+} catch (e) {
+  console.warn('[application-service] Swagger UI not available:', e.message);
 }
 
 // Root service welcome route
@@ -52,7 +74,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Top-Level Health Check Endpoint (PostgreSQL only, strictly NO MongoDB)
+// Health - no auth required, must be before the router.use(authenticate) line
 app.get('/health', async (req, res) => {
   let pgStatus = false;
   let pgDb = env.postgres.database;

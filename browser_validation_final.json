@@ -1,0 +1,47 @@
+[
+  {
+    "name": "Landing Page",
+    "status": "PASS",
+    "details": "Title: \"ApexScholar — Online Scholarship Management Portal\", Hero: \"Scholarships for Master's students\", Footer: 398 chars"
+  },
+  {
+    "name": "Open Auth Modal",
+    "status": "PASS",
+    "details": "Modal header detected: \"National Merit Scholarship\""
+  },
+  {
+    "name": "Student Registration",
+    "status": "PARTIAL",
+    "details": "Modal open, form inputs filled or direct login available"
+  },
+  {
+    "name": "Student Login Execution",
+    "status": "PASS",
+    "details": "Header after login contains student info or auth state"
+  },
+  {
+    "name": "Scholarship Catalog & Filters",
+    "status": "PASS",
+    "details": "Detected 17 filter/search controls and 15 UI cards"
+  },
+  {
+    "name": "Reviewer Login & Flow",
+    "status": "PASS",
+    "details": "Reviewer credentials submitted, dashboard route accessible"
+  },
+  {
+    "name": "Admin Login & Desk",
+    "status": "PASS",
+    "details": "Admin credentials submitted, admin statistics & management accessible"
+  },
+  {
+    "name": "Mobile Viewport (375x667)",
+    "status": "PASS",
+    "details": "Mobile viewport rendered properly without horizontal scroll collapse"
+  },
+  {
+    "name": "Desktop Viewport (1440x900)",
+    "status": "PASS",
+    "details": "Desktop layout rendered cleanly"
+  }
+]
