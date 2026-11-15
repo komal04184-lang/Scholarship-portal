@@ -51,6 +51,7 @@ class DocumentRepository {
       row.document_name = row.document_type || row.original_filename;
       row.document_path = row.storage_key;
       row.file_size = row.file_size_bytes;
+      row.gridfs_id = docData.gridfs_id || null;
     }
     return row;
   }
@@ -66,7 +67,7 @@ class DocumentRepository {
              d.document_type AS document_name,
              d.file_size_bytes AS file_size
       FROM application_documents d
-      WHERE d.id::TEXT = $1::TEXT
+      WHERE d.id::TEXT = $1::TEXT AND d.is_current = true
       LIMIT 1;
     `;
     const res = await query(sql, [String(documentId)]);

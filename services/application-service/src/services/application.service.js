@@ -79,11 +79,17 @@ class ApplicationService {
         { name: 'Academic Marksheet', code: 'MARKSHEET', mandatory: true },
         { name: 'Income Certificate', code: 'INCOME_CERT', mandatory: true },
       ];
-      const normalizedReqs = reqList.map((r) =>
-        typeof r === 'string'
-          ? { requirement_name: r, requirement_code: r.toUpperCase().replace(/\s+/g, '_'), is_mandatory: true }
-          : { requirement_name: r.name || r.document_name || 'Document', requirement_code: r.code || 'DOC', is_mandatory: r.mandatory !== false }
-      );
+      const normalizedReqs = reqList.map((r, idx) => {
+        const name = typeof r === 'string' ? r : (r.name || r.document_name || 'Document');
+        const code = typeof r === 'string'
+          ? r.toUpperCase().replace(/\s+/g, '_')
+          : (r.code || r.requirement_code || (name ? name.toUpperCase().replace(/\s+/g, '_') : `DOC_${idx + 1}`));
+        return {
+          requirement_name: name,
+          requirement_code: code,
+          is_mandatory: typeof r === 'string' ? true : (r.mandatory !== false && r.is_mandatory !== false),
+        };
+      });
       await RequirementRepository.createRequirements(application.application_id, normalizedReqs, dbClient);
 
       // Save dynamic answers if provided
@@ -556,6 +562,13 @@ class ApplicationService {
     tracking.verified_documents_count = documents.filter((d) => d.verification_status === 'VERIFIED').length;
 
     return tracking;
+  }
+
+  /**
+   * Get aggregate application stats for admin dashboard
+   */
+  static async getStats() {
+    return await ApplicationRepository.getStats();
   }
 }
 

@@ -14,4 +14,10 @@ router.put("/admin/:id", authenticateToken, requireAdmin, controller.update);
 router.patch("/admin/:id/status", authenticateToken, requireAdmin, controller.changeStatus);
 router.delete("/admin/:id", authenticateToken, requireAdmin, controller.remove);
 
+// Direct admin write aliases
+router.post("/", authenticateToken, requireAdmin, controller.create);
+router.put("/:id", authenticateToken, requireAdmin, controller.update);
+router.patch("/:id/status", authenticateToken, requireAdmin, controller.changeStatus);
+router.delete("/:id", authenticateToken, requireAdmin, controller.remove);
+
 module.exports = router;

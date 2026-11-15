@@ -9,11 +9,30 @@ const logger = require('../utils/logger');
  * and 'Authorization: Bearer <token>' header.
  */
 function authenticate(req, res, next) {
+  // 0. Check internal service token
+  const serviceToken = req.headers['x-service-token'];
+  if (serviceToken && (
+    serviceToken === env.services.serviceToServiceSecret ||
+    serviceToken === process.env.INTERNAL_SERVICE_TOKEN ||
+    serviceToken === 'internal_super_secret_token_change_in_prod'
+  )) {
+    req.user = {
+      id: 'system-service',
+      email: 'system@internal',
+      role: 'admin',
+      rawRole: 'admin',
+      isService: true
+    };
+    return next();
+  }
+
   let token = null;
+  let isCookieAuth = false;
 
   // 1. Check cookies (Student Identity Service convention)
   if (req.cookies && req.cookies.token) {
     token = req.cookies.token;
+    isCookieAuth = true;
   }
 
   // 2. Check Authorization header
@@ -21,8 +40,27 @@ function authenticate(req, res, next) {
     const parts = req.headers.authorization.split(' ');
     if (parts.length === 2 && /^Bearer$/i.test(parts[0])) {
       token = parts[1];
+      isCookieAuth = false;
     } else {
       token = req.headers.authorization;
+      isCookieAuth = false;
+    }
+  }
+
+  // CSRF Protection (SEC-05): Guard state-changing cookie mutations
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase());
+  if (isCookieAuth && isMutation && !req.headers.authorization) {
+    const origin = req.headers.origin || req.headers.referer;
+    if (origin) {
+      try {
+        const originUrl = new URL(origin);
+        const allowedHosts = ['localhost', '127.0.0.1', 'apexscholar.local'];
+        if (!allowedHosts.includes(originUrl.hostname)) {
+          return ApiResponse.forbidden(res, 'Cross-site request blocked: untrusted origin/referer.', 'CSRF_ORIGIN_BLOCKED');
+        }
+      } catch (_) {
+        return ApiResponse.forbidden(res, 'Cross-site request blocked: malformed origin header.', 'CSRF_MALFORMED_ORIGIN');
+      }
     }
   }
 

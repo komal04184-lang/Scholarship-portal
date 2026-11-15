@@ -279,6 +279,22 @@ class ApplicationRepository {
       console.warn('Idempotency key save error:', e.message);
     }
   }
+  static async getStats() {
+    const sql = `
+      SELECT
+        COUNT(*)::int AS total_applications,
+        COUNT(CASE WHEN status IN ('SUBMITTED', 'UNDER_REVIEW') THEN 1 END)::int AS pending_applications,
+        COUNT(CASE WHEN status = 'APPROVED' THEN 1 END)::int AS approved_applications,
+        COUNT(CASE WHEN status = 'REJECTED' THEN 1 END)::int AS rejected_applications,
+        COUNT(CASE WHEN status = 'DISBURSED' THEN 1 END)::int AS disbursed_applications,
+        COALESCE(SUM(CASE WHEN status IN ('APPROVED', 'DISBURSED') THEN COALESCE((metadata->>'scholarship_amount')::numeric, 0) ELSE 0 END), 0)::numeric AS total_disbursed,
+        COUNT(DISTINCT student_id)::int AS total_students,
+        COUNT(DISTINCT scholarship_id)::int AS total_scholarships
+      FROM applications;
+    `;
+    const res = await query(sql);
+    return res.rows[0] || {};
+  }
 }
 
 module.exports = ApplicationRepository;

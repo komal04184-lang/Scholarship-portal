@@ -15,7 +15,7 @@ export async function create(data) {
   })) });
 }
 
-export async function verifyDocuments(id, documents, reviewerId) {
+export async function verifyDocuments(id, documents, reviewerId, authorizationHeader) {
   if (!Array.isArray(documents) || documents.length === 0) throw httpError('Provide a non-empty documents array');
   if (documents.some(d => !d?.name || !DOC_STATUSES.has(d.status))) throw httpError('Each document needs a name and status: PENDING, VERIFIED, or REJECTED');
   const current = await model.getReview(id);
@@ -31,6 +31,14 @@ export async function verifyDocuments(id, documents, reviewerId) {
   }
   const updated = await model.updateReview(id, { documents: merged, status: 'DOCUMENTS_UNDER_REVIEW' });
   await model.addHistory(id, reviewerId, current.status, updated.status, 'Document verification updated');
+
+  // Sync UNDER_REVIEW status to Application Service if still SUBMITTED
+  try {
+    await updateApplicationStatus(current.applicationId, 'UNDER_REVIEW', 'Review in progress', authorizationHeader);
+  } catch (syncErr) {
+    console.warn('[Review] verifyDocuments: UNDER_REVIEW sync failed for application', current.applicationId, ':', syncErr.message);
+  }
+
   return updated;
 }
 
@@ -78,15 +86,30 @@ export async function decide(
   }
 }
 
-export async function retryPendingCallbacks() {
-  const pending = await model.listPendingCallbacks();
-  for (const review of pending) {
-    try {
-      await updateApplicationStatus(review.applicationId, review.decision, review.decisionRemarks || '');
-      await model.updateReview(review.id, { callbackStatus: 'SYNCED', callbackError: null });
-    } catch (error) {
-      await model.updateReview(review.id, { callbackStatus: 'PENDING', callbackError: error.message });
-    }
+let isRetrying = false;
+
+export async function retryPendingCallbacks(maxRetries = 5) {
+  if (isRetrying) {
+    return 0; // Prevent overlapping retry loops
   }
-  return pending.length;
+  isRetrying = true;
+
+  try {
+    const pending = await model.listPendingCallbacks();
+    let processed = 0;
+
+    for (const review of pending) {
+      // Check current attempts from callbackError if formatted or bound to 10
+      try {
+        await updateApplicationStatus(review.applicationId, review.decision, review.decisionRemarks || '');
+        await model.updateReview(review.id, { callbackStatus: 'SYNCED', callbackError: null });
+        processed++;
+      } catch (error) {
+        await model.updateReview(review.id, { callbackStatus: 'PENDING', callbackError: error.message });
+      }
+    }
+    return processed;
+  } finally {
+    isRetrying = false;
+  }
 }

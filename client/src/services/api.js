@@ -155,35 +155,55 @@ export function deriveCategory(name = '') {
 // Normalizer to ensure consistent scholarship shape across client
 export function normalizeScholarship(s) {
   if (!s) return null;
-  const title = s.name || s.title || 'Scholarship Program';
-  const category = s.category || s.eligible_category || deriveCategory(title);
+  const title = s.title || s.name || 'Scholarship Program';
+  const category = s.category || s.category_name || s.eligible_category || deriveCategory(title);
   const department = s.department || s.eligible_course || 'All Departments';
-  const amount = parseFloat(s.amount) || 0;
-  const min_gpa = s.minimum_cgpa !== null && s.minimum_cgpa !== undefined ? parseFloat(s.minimum_cgpa) : (s.min_gpa ? parseFloat(s.min_gpa) : null);
-  const max_income = s.maximum_income !== null && s.maximum_income !== undefined ? parseFloat(s.maximum_income) : (s.max_income ? parseFloat(s.max_income) : null);
-  const total_slots = s.total_slots || 30;
-  const available_slots = s.available_slots || Math.round(total_slots * 0.6);
+  const amount = parseFloat(s.award_amount ?? s.amount) || 0;
+  const min_gpa = s.min_cgpa !== null && s.min_cgpa !== undefined
+    ? parseFloat(s.min_cgpa)
+    : (s.min_gpa !== null && s.min_gpa !== undefined ? parseFloat(s.min_gpa) : null);
+  const max_income = s.max_income !== null && s.max_income !== undefined ? parseFloat(s.max_income) : null;
+  const total_slots = s.total_slots ? parseInt(s.total_slots) : null;
+  const available_slots = s.available_slots || (total_slots ? Math.round(total_slots * 0.6) : null);
+
+  // Required documents: array of strings or objects
+  let reqDocs = s.required_documents || [];
+  if (Array.isArray(reqDocs) && reqDocs.length > 0 && typeof reqDocs[0] === 'object') {
+    reqDocs = reqDocs.map(d => d.document_name || d.name || 'Document');
+  }
+  if (!Array.isArray(reqDocs) || reqDocs.length === 0) {
+    reqDocs = ['Academic Marksheet', 'Income Certificate', 'College ID Card'];
+  }
+
+  const id = String(s.scholarship_id || s.id || '');
+  const deadline = s.application_end_date || s.deadline || null;
+  const status = s.status || 'open';
 
   return {
     ...s,
-    scholarship_id: s.scholarship_id,
-    id: s.scholarship_id,
+    scholarship_id: id,
+    id,
     title,
     name: title,
     category,
+    category_name: category,
     department,
     amount,
+    award_amount: amount,
     min_gpa,
+    min_cgpa: min_gpa,
     minimum_cgpa: min_gpa,
     max_income,
     maximum_income: max_income,
     total_slots,
     available_slots,
-    deadline: s.deadline || '2027-05-31T23:59:59Z',
-    status: s.status || 'ACTIVE',
-    description: s.description || 'University scholarship grant providing financial tuition assistance and academic recognition.',
+    deadline,
+    application_end_date: deadline,
+    status,
+    description: s.description || 'University scholarship providing financial assistance and academic recognition.',
     disbursement_type: s.disbursement_type || 'Annual',
-    required_documents: s.required_documents || ['Academic Marksheet', 'Income Certificate', 'College ID Card'],
+    required_documents: reqDocs,
+    eligibility_criteria: s.eligibility_criteria || [],
   };
 }
 
@@ -239,7 +259,9 @@ export function clearStoredAuth() {
 
 // Fetch wrapper with cookie-based authentication
 async function request(endpoint, options = {}) {
+  const token = getStoredToken();
   const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers,
   };
 
@@ -276,43 +298,28 @@ async function request(endpoint, options = {}) {
 // Public & Scholarship APIs
 // ----------------------------------------------------
 export async function getScholarships(filters = {}) {
-  try {
-    const params = new URLSearchParams();
-    if (filters.search) params.append('search', filters.search);
-    if (filters.status) params.append('status', filters.status);
-    if (filters.category && filters.category !== 'All') params.append('category', filters.category);
-    if (filters.sortBy) params.append('sort_by', filters.sortBy);
-    params.append('limit', '50');
+  const params = new URLSearchParams();
+  if (filters.search) params.append('search', filters.search);
+  if (filters.status) params.append('status', filters.status);
+  if (filters.category && filters.category !== 'All') params.append('category', filters.category);
+  if (filters.sortBy) params.append('sort_by', filters.sortBy);
+  params.append('limit', '50');
 
-    const query = params.toString() ? `?${params.toString()}` : '';
-    const res = await request(`/scholarships${query}`);
-    const rawList = res.scholarships || res.data || [];
-    return rawList.map(normalizeScholarship);
-  } catch (err) {
-    console.warn('API getScholarships using fallback:', err.message);
-    let list = SEED_SCHOLARSHIPS.map(normalizeScholarship);
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
-      list = list.filter((s) => s.title.toLowerCase().includes(q) || s.description.toLowerCase().includes(q));
-    }
-    return list;
-  }
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const res = await request(`/scholarships${query}`);
+  const rawList = res.items || res.scholarships || res.data || (Array.isArray(res) ? res : []);
+  return rawList.map(normalizeScholarship);
 }
 
 export async function getScholarshipById(id) {
-  try {
-    const res = await request(`/scholarships/${id}`);
-    const raw = res.scholarship || res.data || res;
-    const normalized = normalizeScholarship(raw);
-    if (res.requiredDocuments && res.requiredDocuments.length > 0) {
-      normalized.required_documents = res.requiredDocuments.map((d) => d.document_name);
-    }
-    return normalized;
-  } catch (err) {
-    console.warn('getScholarshipById fallback:', err.message);
-    const found = SEED_SCHOLARSHIPS.find((s) => String(s.scholarship_id) === String(id));
-    return normalizeScholarship(found || SEED_SCHOLARSHIPS[0]);
+  const res = await request(`/scholarships/${id}`);
+  const raw = res.scholarship || res.data || res;
+  if (!raw) return null;
+  const normalized = normalizeScholarship(raw);
+  if (res.requiredDocuments && res.requiredDocuments.length > 0) {
+    normalized.required_documents = res.requiredDocuments.map((d) => d.document_name);
   }
+  return normalized;
 }
 
 // ----------------------------------------------------
@@ -329,12 +336,11 @@ export async function loginApi(email, password) {
 
   const normalizedUser = normalizeUser(res.user);
 
-  // User details localStorage mein save hongi.
-  // JWT token backend HTTP-only cookie mein manage karega.
-  setStoredAuth(null, normalizedUser);
+  // User details and JWT token in localStorage + HTTP-only cookie
+  setStoredAuth(res.token || null, normalizedUser);
 
   return {
-    token: null,
+    token: res.token || null,
     user: normalizedUser,
   };
 }
@@ -385,10 +391,10 @@ export async function registerApi(userData) {
 
   const normalizedUser = normalizeUser(res.user);
 
-  setStoredAuth(null, normalizedUser);
+  setStoredAuth(res.token || null, normalizedUser);
 
   return {
-    token: null,
+    token: res.token || null,
     user: normalizedUser,
   };
 }
@@ -723,47 +729,30 @@ export async function getFormAnswers(applicationId) {
 // ----------------------------------------------------
 export async function getAdminMetrics() {
   try {
-    const res = await request('/admin/dashboard').catch(() => null);
-    const s = res?.stats || {};
+    const res = await request('/applications/admin/stats');
+    const s = res?.stats || res?.data?.stats || {};
     return {
       total_applications: parseInt(s.total_applications || 0, 10),
       pending_review: parseInt(s.pending_applications || 0, 10),
       approved_grants: parseInt(s.approved_applications || 0, 10),
       rejected_count: parseInt(s.rejected_applications || 0, 10),
-      total_disbursed: parseFloat(s.total_disbursed || 75000),
+      total_disbursed: parseFloat(s.total_disbursed || 0),
       total_budget: 7500000,
       avg_cgpa: '8.45',
       total_students: parseInt(s.total_students || 0, 10),
       total_scholarships: parseInt(s.total_scholarships || 0, 10),
     };
   } catch (err) {
-    console.warn('getAdminMetrics fallback:', err.message);
-    return {
-      total_applications: 5,
-      pending_review: 2,
-      approved_grants: 1,
-      rejected_count: 1,
-      total_disbursed: 75000,
-      total_budget: 7500000,
-      avg_cgpa: '8.45',
-    };
+    console.warn('getAdminMetrics error:', err.message);
+    throw err;
   }
 }
 
 export async function getAdminApplications(statusFilter = 'ALL') {
   try {
     const query = statusFilter !== 'ALL' ? `?status=${statusFilter}&limit=50` : '?limit=50';
-    
-    // First try the Application Service endpoint: /api/v1/applications/admin/all
-    let rawApps = [];
-    try {
-      const res = await request(`/applications/admin/all${query}`);
-      rawApps = res.data?.applications || res.applications || [];
-    } catch {
-      // Fallback to monolith /api/v1/admin/applications
-      const res = await request(`/admin/applications${query}`);
-      rawApps = res.applications || res.data?.applications || [];
-    }
+    const res = await request(`/applications/admin/all${query}`);
+    const rawApps = res.data?.applications || res.applications || [];
 
     return rawApps.map((a) => ({
       id: String(a.application_id || a.id),
@@ -785,33 +774,21 @@ export async function getAdminApplications(statusFilter = 'ALL') {
       remarks: a.reviewer_name ? `Reviewed by ${a.reviewer_name}` : (a.remarks || 'Awaiting reviewer remarks'),
     }));
   } catch (err) {
-    console.warn('getAdminApplications fallback:', err.message);
-    return [];
+    console.warn('getAdminApplications error:', err.message);
+    throw err;
   }
 }
 
 export async function updateApplicationStatus(appId, newStatus, remarks = '') {
   try {
-    // Attempt updating via Application Service first
-    try {
-      return await request(`/applications/${appId}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          status: newStatus,
-          remarks: remarks || `Status changed to ${newStatus}`,
-          comment: remarks || `Status changed to ${newStatus}`,
-        }),
-      });
-    } catch {
-      // Fallback to monolith endpoint
-      return await request(`/admin/applications/${appId}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          status: newStatus,
-          comment: remarks || `Status changed to ${newStatus}`,
-        }),
-      });
-    }
+    return await request(`/applications/${appId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status: newStatus,
+        remarks: remarks || `Status changed to ${newStatus}`,
+        comment: remarks || `Status changed to ${newStatus}`,
+      }),
+    });
   } catch (err) {
     console.warn('updateApplicationStatus error:', err.message);
     throw err;
@@ -903,77 +880,67 @@ export async function submitReviewDecision(reviewId, decision, remarks = '', rev
   return json.data;
 }
 
+
 export async function createScholarship(scholarshipData) {
-  try {
-    const res = await request('/admin/scholarships', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: scholarshipData.title || scholarshipData.name,
-        description: scholarshipData.description || '',
-        amount: parseFloat(scholarshipData.amount),
-        status: 'ACTIVE',
-        deadline: scholarshipData.deadline ? scholarshipData.deadline.split('T')[0] : '2027-05-31',
-      }),
-    });
+  const payload = {
+    // Support both old and new field naming conventions
+    title: scholarshipData.title || scholarshipData.name,
+    name: scholarshipData.title || scholarshipData.name,
+    description: scholarshipData.description || '',
+    category: scholarshipData.category,
+    category_name: scholarshipData.category,
+    // Support both amount and award_amount
+    amount: Number(scholarshipData.amount || scholarshipData.award_amount || 0),
+    award_amount: Number(scholarshipData.amount || scholarshipData.award_amount || 0),
+    min_cgpa: scholarshipData.min_gpa || scholarshipData.min_cgpa
+      ? Number(scholarshipData.min_gpa || scholarshipData.min_cgpa)
+      : null,
+    max_income: scholarshipData.max_income
+      ? Number(scholarshipData.max_income)
+      : null,
+    department: scholarshipData.department || null,
+    total_slots: scholarshipData.total_slots
+      ? Number(scholarshipData.total_slots)
+      : null,
+    deadline: scholarshipData.deadline
+      ? scholarshipData.deadline.split('T')[0]
+      : null,
+    application_end_date: scholarshipData.deadline
+      ? scholarshipData.deadline.split('T')[0]
+      : null,
+    status: 'published',
+    required_documents: scholarshipData.required_documents || [],
+    eligibility_criteria: scholarshipData.eligibility_criteria || [],
+    provider_name: scholarshipData.provider_name || 'ApexScholar Foundation',
+    academic_year: scholarshipData.academic_year || '2026-2027',
+  };
 
-    const schId = res.scholarship?.scholarship_id;
-    if (schId) {
-      if (scholarshipData.min_gpa || scholarshipData.max_income || scholarshipData.department || scholarshipData.category) {
-        await request(`/admin/scholarships/${schId}/criteria`, {
-          method: 'POST',
-          body: JSON.stringify({
-            minimum_cgpa: scholarshipData.min_gpa || null,
-            maximum_income: scholarshipData.max_income || null,
-            eligible_course: scholarshipData.department || null,
-            eligible_category: scholarshipData.category || null,
-          }),
-        }).catch(() => {});
-      }
+  const res = await request('/scholarships', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 
-      const docs = scholarshipData.required_documents || ['Transcripts', 'Income Certificate'];
-      for (const d of docs) {
-        await request(`/admin/scholarships/${schId}/documents`, {
-          method: 'POST',
-          body: JSON.stringify({ document_name: d, mandatory: true }),
-        }).catch(() => {});
-      }
-    }
-
-    return res;
-  } catch (err) {
-    console.warn('createScholarship error:', err.message);
-    throw err;
-  }
+  return res;
 }
 
 export async function checkSystemHealth() {
   try {
-    // Try Application Service health first
-    let appServiceHealth = null;
-    try {
-      const res = await request('/applications/health');
-      appServiceHealth = res;
-    } catch {
-      // Not critical
+    const res = await fetch('/health');
+    if (!res.ok) {
+      return { status: 'degraded', httpStatus: res.status };
     }
-
-    // Try monolith/gateway health
-    const res = await request('/health').catch(() => null);
+    const data = await res.json();
     return {
-      ...(res || {}),
-      application_service: appServiceHealth,
-      status: 'healthy',
-      services: {
-        postgres: 'connected',
-      },
+      status: data.status || (data.success ? 'healthy' : 'degraded'),
+      service: data.service,
+      timestamp: data.timestamp,
+      services: data.services || {},
     };
   } catch (err) {
+    console.warn('checkSystemHealth error:', err.message);
     return {
-      status: 'healthy',
-      services: {
-        postgres: 'connected',
-      },
-      uptime: 3600,
+      status: 'unreachable',
+      error: err.message,
     };
   }
 }

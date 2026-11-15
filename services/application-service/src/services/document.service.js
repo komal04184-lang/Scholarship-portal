@@ -7,6 +7,15 @@ const StorageService = require('./storage.service');
 const env = require('../config/env');
 const logger = require('../utils/logger');
 
+// GridFS integration (optional — graceful fallback to local filesystem)
+let gridfsService = null;
+try {
+  gridfsService = require('./gridfs.service');
+  logger.info('GridFS service loaded — MongoDB document storage enabled');
+} catch (e) {
+  logger.warn('GridFS service unavailable, using local filesystem storage only');
+}
+
 class DocumentService {
   /**
    * Upload and attach a document to an application
@@ -29,12 +38,70 @@ class DocumentService {
       throw err;
     }
 
-    // Process secure file storage
+    // Security (SEC-02): Validate Server-side Magic Bytes against declared extension and MIME
+    const fileHeaderBuffer = await fs.promises.readFile(file.path);
+    if (!fileHeaderBuffer || fileHeaderBuffer.length < 4) {
+      if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      const err = new Error('File corrupted or empty. Invalid binary format.');
+      err.statusCode = 400;
+      err.errorCode = 'INVALID_FILE_SIGNATURE';
+      throw err;
+    }
+
+    let isMagicValid = false;
+    // PDF: %PDF- (0x25, 0x50, 0x44, 0x46, 0x2D)
+    if (ext === '.pdf') {
+      isMagicValid = fileHeaderBuffer.subarray(0, 5).toString('ascii') === '%PDF-';
+    } else if (ext === '.png') {
+      // PNG: 89 50 4E 47 0D 0A 1A 0A
+      const pngHeader = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+      isMagicValid = fileHeaderBuffer.length >= 8 && fileHeaderBuffer.subarray(0, 8).equals(pngHeader);
+    } else if (ext === '.jpg' || ext === '.jpeg') {
+      // JPEG: FF D8 FF
+      isMagicValid = fileHeaderBuffer.length >= 3 && fileHeaderBuffer[0] === 0xFF && fileHeaderBuffer[1] === 0xD8 && fileHeaderBuffer[2] === 0xFF;
+    }
+
+    if (!isMagicValid) {
+      if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      const err = new Error(`File binary signature does not match permitted ${ext.toUpperCase()} format.`);
+      err.statusCode = 400;
+      err.errorCode = 'INVALID_FILE_SIGNATURE';
+      throw err;
+    }
+
+    // Process secure file storage (local filesystem)
     const storageResult = await StorageService.saveFile(
       file.path,
       file.originalname,
       file.mimetype
     );
+
+    // Also upload to MongoDB GridFS for persistent cloud-like storage
+    let gridfsId = null;
+    if (gridfsService) {
+      try {
+        const gridfsAvailable = await gridfsService.isAvailable();
+        if (gridfsAvailable) {
+          const fileBuffer = await fs.promises.readFile(
+            path.join(env.upload.dir, storageResult.storageKey)
+          );
+          const gfsResult = await gridfsService.uploadToGridFS(
+            fileBuffer,
+            file.originalname,
+            file.mimetype,
+            {
+              applicationId: application.id || application.application_id,
+              uploadedBy: user ? user.id : 'system',
+              storageKey: storageResult.storageKey,
+            }
+          );
+          gridfsId = gfsResult.gridfsId;
+          logger.info(`Document also stored in GridFS: ${gridfsId}`);
+        }
+      } catch (gfsErr) {
+        logger.warn(`GridFS upload failed (using local only): ${gfsErr.message}`);
+      }
+    }
 
     // Clean up temporary multer upload file if different
     if (file.path && fs.existsSync(file.path) && path.basename(file.path) !== storageResult.storageKey) {
@@ -48,6 +115,7 @@ class DocumentService {
       document_type: body.document_type || body.document_name || file.originalname.split('.')[0] || 'Document',
       original_filename: file.originalname,
       storage_key: storageResult.storageKey,
+      gridfs_id: gridfsId,
       mime_type: file.mimetype,
       file_size_bytes: storageResult.fileSize,
       checksum_sha256: storageResult.checksum,
@@ -182,16 +250,52 @@ class DocumentService {
 
   /**
    * Retrieve file stream and metadata for secure authorized download
+   * Uses GridFS if gridfsId is stored, falls back to local filesystem
    */
   static async getDownloadStream(documentId, user) {
     const doc = await this.getDocumentById(documentId, user);
-    const stream = StorageService.getFileStream(doc.storage_key);
 
+    // Try GridFS first if available (by gridfs_id or via metadata lookup)
+    if (gridfsService) {
+      try {
+        const gridfsAvailable = await gridfsService.isAvailable();
+        if (gridfsAvailable) {
+          const { getConnection } = gridfsService;
+          const { bucket } = await getConnection();
+          let gfsFiles = [];
+          if (doc.gridfs_id) {
+            const { ObjectId } = require('mongodb');
+            gfsFiles = await bucket.find({ _id: new ObjectId(doc.gridfs_id) }).toArray();
+          }
+          if (gfsFiles.length === 0 && doc.storage_key) {
+            gfsFiles = await bucket.find({ 'metadata.storageKey': doc.storage_key }).toArray();
+          }
+
+          if (gfsFiles.length > 0) {
+            const targetFile = gfsFiles[0];
+            const stream = bucket.openDownloadStream(targetFile._id);
+            return {
+              stream,
+              filename: doc.original_filename || targetFile.filename,
+              mimeType: doc.mime_type || (targetFile.metadata && targetFile.metadata.mimeType),
+              sizeBytes: doc.file_size_bytes || targetFile.length,
+              source: 'gridfs',
+            };
+          }
+        }
+      } catch (gfsErr) {
+        logger.warn(`GridFS download fallback: ${gfsErr.message}`);
+      }
+    }
+
+    // Fallback: local filesystem
+    const stream = StorageService.getFileStream(doc.storage_key);
     return {
       stream,
       filename: doc.original_filename,
       mimeType: doc.mime_type,
       sizeBytes: doc.file_size_bytes,
+      source: 'local',
     };
   }
 
@@ -211,6 +315,24 @@ class DocumentService {
 
     await DocumentRepository.deleteDocument(documentId);
     await StorageService.deleteFile(doc.storage_key);
+
+    // If GridFS is available, clean up MongoDB GridFS chunked file
+    if (gridfsService) {
+      try {
+        const gridfsAvailable = await gridfsService.isAvailable();
+        if (gridfsAvailable) {
+          const { getConnection } = gridfsService;
+          const { bucket } = await getConnection();
+          const gfsFiles = await bucket.find({ 'metadata.storageKey': doc.storage_key }).toArray();
+          for (const gfsFile of gfsFiles) {
+            await bucket.delete(gfsFile._id);
+            logger.info(`Deleted GridFS document: ${gfsFile._id}`);
+          }
+        }
+      } catch (gfsErr) {
+        logger.warn(`GridFS delete error: ${gfsErr.message}`);
+      }
+    }
 
     await AuditRepository.recordLog(
       doc.application_id,

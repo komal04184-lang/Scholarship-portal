@@ -1,0 +1,201 @@
+openapi: 3.0.3
+info:
+  title: ApexScholar Scholarship Service API
+  description: |
+    Scholarship management microservice for the ApexScholar Portal.
+    Provides CRUD operations for scholarships, with ETag caching, XML content negotiation,
+    GraphQL endpoint, and SOAP eligibility verification.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3002
+    description: Local development
+  - url: http://localhost:3000
+    description: Via API Gateway
+tags:
+  - name: Scholarships
+  - name: Health
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      responses:
+        '200':
+          description: Service is running
+
+  /api/v1/scholarships:
+    get:
+      tags: [Scholarships]
+      summary: List scholarships (ETag + XML negotiation supported)
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 10 } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: If-None-Match, in: header, schema: { type: string } }
+      responses:
+        '200':
+          description: Scholarship list
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+        '304':
+          description: Not modified
+
+    post:
+      tags: [Scholarships]
+      summary: Create scholarship (admin)
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScholarshipInput' }
+      responses:
+        '201':
+          description: Created
+
+  /api/v1/scholarships/{id}:
+    get:
+      tags: [Scholarships]
+      summary: Get scholarship by ID
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: If-None-Match, in: header, schema: { type: string } }
+      responses:
+        '200':
+          description: Found
+          headers:
+            ETag: { schema: { type: string } }
+        '304':
+          description: Not modified
+        '404':
+          description: Not found
+
+    put:
+      tags: [Scholarships]
+      summary: Update scholarship (admin)
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScholarshipInput' }
+      responses:
+        '200': { description: Updated }
+        '404': { description: Not found }
+
+    delete:
+      tags: [Scholarships]
+      summary: Delete scholarship (admin)
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Deleted }
+        '404': { description: Not found }
+
+  /api/v1/scholarships/{id}/status:
+    patch:
+      tags: [Scholarships]
+      summary: Update scholarship status
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [open, closed, draft] }
+      responses:
+        '200': { description: Status updated }
+
+  /graphql:
+    post:
+      tags: [Scholarships]
+      summary: GraphQL endpoint
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query: { type: string }
+                variables: { type: object }
+            example:
+              query: "{ scholarships(limit: 5) { id name amount status } }"
+      responses:
+        '200': { description: GraphQL result }
+
+  /soap/wsdl:
+    get:
+      tags: [Scholarships]
+      summary: WSDL for EligibilityService
+      responses:
+        '200':
+          description: WSDL XML
+          content:
+            text/xml: {}
+
+  /soap/eligibility:
+    post:
+      tags: [Scholarships]
+      summary: SOAP eligibility check
+      requestBody:
+        content:
+          text/xml:
+            schema: { type: string }
+      responses:
+        '200':
+          description: SOAP response
+          content:
+            text/xml: {}
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Scholarship:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        amount: { type: number }
+        min_cgpa: { type: number }
+        max_income: { type: number }
+        department: { type: string }
+        deadline: { type: string }
+        total_slots: { type: integer }
+        status: { type: string }
+        eligibility_criteria: { type: array }
+        required_documents: { type: array }
+        created_at: { type: string }
+
+    ScholarshipInput:
+      type: object
+      required: [name, amount]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        amount: { type: number }
+        min_cgpa: { type: number }
+        max_income: { type: number }
+        department: { type: string }
+        deadline: { type: string }
+        total_slots: { type: integer }
+        status: { type: string }
+        eligibility_criteria: { type: array }
+        required_documents: { type: array }

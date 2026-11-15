@@ -1,0 +1,42 @@
+[
+  {
+    "flowName": "Landing Page",
+    "status": "PASS",
+    "details": "Title: \"ApexScholar — Online Scholarship Management Portal\", Hero preview: \"Scholarships for Master's students...\", Footer text length: 388"
+  },
+  {
+    "flowName": "Auth Modal Open",
+    "status": "PARTIAL",
+    "details": "Auth button clicked: false"
+  },
+  {
+    "flowName": "Student Registration",
+    "status": "SKIP",
+    "details": "Inputs not found in opened modal"
+  },
+  {
+    "flowName": "Scholarships Catalog",
+    "status": "PASS",
+    "details": "Rendered catalog with search input: true, Cards count: 15"
+  },
+  {
+    "flowName": "Dashboard Navigation",
+    "status": "PASS",
+    "details": "Active view header: \"Scholarships for Master's students\""
+  },
+  {
+    "flowName": "Reviewer Portal Navigation",
+    "status": "PASS",
+    "details": "Reviewer portal rendered, includes Reviewer prompt: false"
+  },
+  {
+    "flowName": "Admin Portal Navigation",
+    "status": "PASS",
+    "details": "Admin portal prompt/panel rendered: false"
+  },
+  {
+    "flowName": "Mobile Responsive View",
+    "status": "PASS",
+    "details": "Rendered successfully at 375x667 mobile resolution with no crashing"
+  }
+]

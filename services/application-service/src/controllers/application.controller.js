@@ -212,6 +212,18 @@ class ApplicationController {
       next(err);
     }
   }
+
+  /**
+   * GET /api/v1/applications/admin/stats
+   */
+  static async getStats(req, res, next) {
+    try {
+      const stats = await ApplicationService.getStats();
+      return ApiResponse.success(res, 'Application statistics retrieved successfully', { stats });
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 module.exports = ApplicationController;

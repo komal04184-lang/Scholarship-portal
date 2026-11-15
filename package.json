@@ -1,0 +1,11 @@
+{
+  "name": "apexscholar-portal",
+  "version": "1.0.0",
+  "description": "ApexScholar Microservices Online Scholarship Portal",
+  "scripts": {
+    "start": "node start-all.js",
+    "dev": "node start-all.js",
+    "test": "npm test --prefix api-gateway && npm test --prefix services/scholarship-service && npm test --prefix services/review-service",
+    "build:client": "npm run build --prefix client"
+  }
+}

@@ -1,113 +1,91 @@
 # ApexScholar — Online Scholarship Management Portal 🎓
 
-A full-stack, enterprise-grade university scholarship portal designed for academic institutions to manage, scrutinize, award, and disburse student scholarships with complete transparency.
+ApexScholar is an enterprise-grade university scholarship portal designed for academic institutions to manage, scrutinize, award, and disburse student scholarships with complete transparency.
 
-Built with **PostgreSQL** (relational core, RBAC, financial ledger), **MongoDB** (document metadata, GridFS artifacts, audit trails), **Express/Node.js** (REST API), and **React + Vite** (responsive single-page application).
-
----
-
-## 🌟 Key Features
-
-### 1. Student Portal
-- **Scholarship Discovery & Live Filtering**: Filter awards by Category (*Merit, STEM, Need-Based, Research, International*), Department, Minimum CGPA, and Maximum Annual Income.
-- **Application Submission Wizard**:
-  - Step 1: Academic profile & eligibility confirmation.
-  - Step 2: Statement of Purpose (SOP) & motivation essay.
-  - Step 3: Secure multi-file document upload (*mark sheets, income proof, recommendations*).
-  - Step 4: Submission confirmation with celebratory confetti.
-- **Real-Time Application Tracker**: Interactive timeline visualizing review milestones (*Submitted → Under Review → Approved → Disbursed*).
-- **Academic Profile Editor**: Update contact details, CGPA, and income records.
-
-### 2. Administrative & Directorate Console
-- **Executive KPI Dashboard**: Live tracking of Total Applications, Disbursed Funds (₹), Approval Rates, Pending Scrutiny Queue, and Average CGPA.
-- **Application Scrutiny Desk**: Filter queue by status (*Submitted, Under Review, Approved, Rejected, Disbursed*), inspect applicant credentials, and submit audit decision notes.
-- **Scholarship Scheme Management**: Create and configure new scholarship grants with custom eligibility criteria, quotas, and deadlines.
-- **System Diagnostics**: Real-time health monitor inspecting PostgreSQL connection pools and MongoDB cluster status.
+Built using an asynchronous **Microservices Architecture** with **Database-per-Service (PostgreSQL)**, **MongoDB GridFS** for binary document artifacts with resilient local failover, **API Gateway**, **GraphQL**, **SOAP/WSDL**, and **React + Vite**.
 
 ---
 
-## 🏗️ Architecture & Database Design
+## 🏛️ Microservice Architecture & Port Manifest
 
-- **PostgreSQL (`portal` schema)**:
-  - `student`: Academic profiles, UID, CGPA, family annual income, department.
-  - `admin_user`: Committee members and reviewers with role-based access control (`admin`, `officer`, `superadmin`).
-  - `scholarship`: Program details, funding amounts, slot allocations, GPA/income eligibility thresholds.
-  - `application`: Core student applications, submission timestamps, and current state.
-  - `application_status_history`: Auditable timeline tracking every status change and review remark.
-  - `disbursement`: Transaction records, sanctioned amounts, and transfer confirmation numbers.
-- **MongoDB**:
-  - `document_metadata`: File metadata, MIME types, GridFS chunks, and verification flags.
-  - `audit_logs`: Immutable logging for compliance and governance.
+| Service | Port | Primary Database | Key Interfaces & API Docs |
+| :--- | :---: | :--- | :--- |
+| **API Gateway** | `3000` | In-Memory (Rate Limiting) | Reverse proxy, distributed tracing (`X-Correlation-ID`), global rate limiting (`/health`) |
+| **Identity Service** | `3001` | PostgreSQL (`identity_db`) | `http://localhost:3001/api-docs` (User profiles, authentication, user sessions) |
+| **Scholarship Service** | `3002` | PostgreSQL (`scholarship_db`) | `http://localhost:3002/api-docs`<br>• **GraphQL:** `http://localhost:3002/graphql`<br>• **SOAP WSDL:** `http://localhost:3002/soap/wsdl` |
+| **Application Service** | `3003` | PostgreSQL (`application_db`) + MongoDB GridFS | `http://localhost:3003/api-docs`<br>• Lifecycle status engine, document uploads, admin metrics |
+| **Review Service** | `3004` | PostgreSQL (`review_db`) | `http://localhost:3004/api-docs`<br>• Reviewer assignment, criteria evaluation, automatic callback retry loop |
+| **Frontend Client** | `5173` | React + Vite (SPA) | Connected via API Gateway proxy (`:3000`) |
 
 ---
 
-## 🚀 Quick Start Guide
+## 🌟 Key Capabilities & Protocol Interoperability
 
-### 1. Backend Server Setup
+### 1. Unified API Gateway (`:3000`)
+- **Reverse Proxy:** Directs incoming `/api/v1/auth`, `/api/v1/scholarships`, `/api/v1/applications`, and `/api/reviews` to backend microservices.
+- **Correlation ID:** Generates or forwards `X-Correlation-ID` across all services.
+- **Rate Limiting:** Enforces 100 requests / 15 minutes generally and 15 requests / 15 minutes on auth endpoints.
 
-```bash
-cd server
+### 2. Multi-Protocol Support
+- **REST APIs:** Full JSON REST APIs across all 4 services with standardized status codes (`200`, `201`, `400`, `401`, `403`, `404`, `409`, `429`).
+- **GraphQL (`:3002/graphql`):** Flexible querying of scholarship programs, criteria, limits, and deadlines.
+- **SOAP / WSDL (`:3002/soap/wsdl`):** Formal enterprise web service contract with `POST /soap/eligibility` processing standard XML SOAP envelopes.
 
-# Install dependencies
-npm install
+### 3. Document Processing with MongoDB GridFS & Resilient Failover
+- Uploaded files (PDF, PNG, JPEG) are checked for server-side binary magic-byte signatures.
+- Files are saved in **MongoDB GridFS** (`scholarship_documents` database) with relational metadata in PostgreSQL (`application_documents`).
+- **Zero-Downtime Fallback:** If MongoDB is offline, documents are stored and streamed safely via local filesystem storage (`uploads/`) with SHA-256 integrity checksums.
 
-# Configure environment variables
-# Copy .env.example to .env and adjust PostgreSQL / MongoDB credentials if needed:
-# cp .env.example .env
+### 4. Security & Session Hardening
+- **Authentication:** Standard RFC 7519 HMAC-SHA256 tokens and HTTP-only session cookies.
+- **Session Management:** Refresh tokens stored as SHA-256 hashes in `user_sessions`. Rotation enforced on every refresh. Replay/reuse of revoked tokens triggers immediate family invalidation.
+- **CSRF Defense:** State-changing cookie requests verified against trusted Origin/Referer headers.
 
-# Run database schema migrations
-npm run migrate
+---
 
-# Seed database with realistic demo scholarships and applicants
-npm run seed
+## 🚀 Running the Project Locally (PowerShell)
 
-# Start API Server (Runs on http://localhost:3000)
-npm run dev
+### Prerequisites
+- Node.js (v18+)
+- PostgreSQL (running locally on port `5432` with databases `identity_db`, `scholarship_db`, `application_db`, `review_db`)
+- MongoDB (running on port `27017` for GridFS storage)
+
+### Quick Start: All Microservices
+From the project root:
+```powershell
+node start-all.js
+```
+This concurrently starts:
+- API Gateway (`:3000`)
+- Identity Service (`:3001`)
+- Scholarship Service (`:3002`)
+- Application Service (`:3003`)
+- Review Service (`:3004`)
+- Frontend Client (`:5173`)
+
+---
+
+## 🧪 Testing & Validation
+
+### Run Full Regression Suite
+```powershell
+# Phase 1 & 2 Core End-to-End Workflow Verification
+node scripts/verify_e2e_journey.js
+
+# Phase 2 Authorization & RBAC Tests
+node scripts/test_phase2_auth.js
+
+# Phase 3 GridFS & Document Storage Tests
+node scripts/test_gridfs.js
+
+# Phase 4 Security Hardening Suite (Magic bytes, Refresh reuse, CSRF, Rate limits)
+node scripts/test_security_hardening.js
+
+# Frontend Production Build Check
+npm run build --prefix client
 ```
 
-### 2. Frontend Client Setup
-
-```bash
-cd client
-
-# Install dependencies
-npm install
-
-# Start Vite Development Server (Runs on http://localhost:5173)
-npm run dev
-```
-
-The Vite dev server proxies `/api` and `/uploads` directly to `http://localhost:3000`.
-
 ---
 
-## 🔑 Demo & Evaluator Accounts
-
-For rapid testing and grading, pre-seeded accounts and one-click demo login buttons are provided on the interface:
-
-| Role | Email | Password | Permissions |
-| :--- | :--- | :--- | :--- |
-| **Student** | `aarav.sharma@example.edu` | `Password123!` | Browse, apply, edit academic profile, track status |
-| **Review Officer** | `reviewer@scholarship.edu` | `ReviewerPass123!` | Application scrutiny, document verification, remarks |
-| **Administrator** | `admin@scholarship.edu` | `AdminPass123!` | Full control, approve/reject grants, create scholarships |
-
----
-
-## 📡 REST API Reference
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/v1/health` | System health check (PostgreSQL + MongoDB status) |
-| `POST` | `/api/v1/auth/register` | Register new student account |
-| `POST` | `/api/v1/auth/login` | Student login (returns JWT Bearer token) |
-| `POST` | `/api/v1/auth/admin/login`| Admin/Officer login |
-| `GET` | `/api/v1/scholarships` | List public scholarships with search & filters |
-| `GET` | `/api/v1/scholarships/:id` | Get scholarship details & eligibility rules |
-| `GET` | `/api/v1/student/profile` | Get authenticated student academic profile |
-| `PUT` | `/api/v1/student/profile` | Update student profile and contact details |
-| `GET` | `/api/v1/applications/my-applications` | Get authenticated student's applications |
-| `POST` | `/api/v1/applications` | Submit application with multipart documents |
-| `GET` | `/api/v1/admin/dashboard/stats` | Executive KPI analytics |
-| `GET` | `/api/v1/admin/applications` | Review queue with status filters |
-| `PATCH`| `/api/v1/admin/applications/:id/status` | Update status (`UNDER_REVIEW`, `APPROVED`, etc.) |
-| `POST` | `/api/v1/admin/scholarships` | Create new scholarship scheme |
+## 📖 Demonstration Runbook
+See [`docs/DEMONSTRATION_GUIDE.md`](./docs/DEMONSTRATION_GUIDE.md) for full cURL and PowerShell command examples covering the entire student and reviewer workflow.
