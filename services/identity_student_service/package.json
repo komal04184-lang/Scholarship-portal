@@ -1,0 +1,12 @@
+{
+  "name": "identity-student-service-root",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "migrate": "node backend/migrations/run_migrations.js",
+    "test": "node backend/tests/run_tests.js"
+  }
+}
+
