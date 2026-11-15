@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import * as controller from '../controllers/reviewController.js';
-import { requireReviewer, requireServiceToken } from '../middleware/auth.js';
+import { requireReviewer, requireServiceToken, requireServiceOrReviewer } from '../middleware/auth.js';
 
 const router = Router();
-// Only trusted microservices may create reviews; reviewer endpoints require a reviewer/admin JWT.
-router.post('/', requireServiceToken, controller.createReview);
+// Reviews may be created by internal microservices OR authorized reviewers/admins
+router.post('/', requireServiceOrReviewer, controller.createReview);
 router.use(requireReviewer);
 router.get('/', controller.listReviews);
 router.get('/application/:applicationId', controller.getByApplication);

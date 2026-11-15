@@ -32,6 +32,15 @@ export function requireServiceToken(req, res, next) {
 }
 
 export function requireReviewer(req, res, next) {
+  // Check if caller provides a valid internal service token
+  const serviceToken = req.get('x-service-token');
+  const expected = process.env.INTERNAL_SERVICE_TOKEN;
+  if (serviceToken && expected && serviceToken.length === expected.length && crypto.timingSafeEqual(Buffer.from(serviceToken), Buffer.from(expected))) {
+    req.user = { id: 'service', role: 'admin' };
+    req.auth = { type: 'service' };
+    return next();
+  }
+
   const header = req.get('authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return unauthorized(res);
@@ -45,4 +54,18 @@ export function requireReviewer(req, res, next) {
   } catch {
     return unauthorized(res, 'Invalid or expired access token');
   }
+}
+
+export function requireServiceOrReviewer(req, res, next) {
+  // Try service token first
+  const serviceToken = req.get('x-service-token');
+  const expected = process.env.INTERNAL_SERVICE_TOKEN;
+  if (serviceToken && expected && serviceToken.length === expected.length && crypto.timingSafeEqual(Buffer.from(serviceToken), Buffer.from(expected))) {
+    req.auth = { type: 'service', service: req.get('x-caller-service') || 'unknown' };
+    req.user = { id: 'service', role: 'admin' };
+    return next();
+  }
+
+  // Fallback to reviewer/admin JWT
+  return requireReviewer(req, res, next);
 }

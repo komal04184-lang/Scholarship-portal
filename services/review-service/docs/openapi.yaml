@@ -1,0 +1,151 @@
+openapi: 3.0.3
+info:
+  title: ApexScholar Review Service API
+  version: 1.0.0
+  description: Review management microservice for the ApexScholar Portal.
+servers:
+  - url: http://localhost:3004
+    description: Local development
+  - url: http://localhost:3000
+    description: Via API Gateway (use /api/v1/reviews)
+tags:
+  - name: Reviews
+  - name: Health
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200': { description: Healthy }
+
+  /api/reviews:
+    post:
+      tags: [Reviews]
+      summary: Create a review for an application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [applicationId, studentId, scholarshipId]
+              properties:
+                applicationId: { type: string }
+                studentId: { type: string }
+                scholarshipId: { type: string }
+                documents:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      documentId: { type: string }
+                      status: { type: string, default: PENDING }
+      responses:
+        '201':
+          description: Review created
+        '409':
+          description: Review already exists
+
+    get:
+      tags: [Reviews]
+      summary: List all reviews
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: Review list }
+
+  /api/reviews/{id}:
+    get:
+      tags: [Reviews]
+      summary: Get review by ID
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Review found }
+        '404': { description: Not found }
+
+  /api/reviews/{id}/documents:
+    patch:
+      tags: [Reviews]
+      summary: Update document verification statuses
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documents]
+              properties:
+                documents:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      status: { type: string, enum: [PENDING, VERIFIED, REJECTED] }
+                      remarks: { type: string }
+      responses:
+        '200': { description: Documents updated }
+
+  /api/reviews/{id}/eligibility:
+    patch:
+      tags: [Reviews]
+      summary: Set eligibility decision
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eligible]
+              properties:
+                eligible: { type: boolean }
+                remarks: { type: string }
+      responses:
+        '200': { description: Eligibility set }
+
+  /api/reviews/{id}/decision:
+    patch:
+      tags: [Reviews]
+      summary: Submit final review decision
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [APPROVED, REJECTED, CORRECTION_REQUIRED]
+                remarks: { type: string }
+                reviewedBy: { type: string }
+      responses:
+        '200': { description: Decision recorded }
+        '409': { description: Already decided }
+
+components:
+  schemas:
+    Review:
+      type: object
+      properties:
+        id: { type: string }
+        applicationId: { type: string }
+        studentId: { type: string }
+        scholarshipId: { type: string }
+        status: { type: string }
+        documents: { type: array }
+        eligible: { type: boolean }
+        decision: { type: string }
+        reviewedBy: { type: string }
+        createdAt: { type: string }
+        updatedAt: { type: string }
