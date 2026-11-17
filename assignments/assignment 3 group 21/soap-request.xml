@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:dbt="urn:dbtbank:payments">
+    <soap:Header>
+        <dbt:AuthHeader>
+            <dbt:apiKey>SCHOLARSHIP-PORTAL-KEY-998811</dbt:apiKey>
+            <dbt:merchantToken>tok_gov_scholarship_2026</dbt:merchantToken>
+        </dbt:AuthHeader>
+    </soap:Header>
+    <soap:Body>
+        <dbt:disburseGrantRequest>
+            <dbt:applicationId>10425</dbt:applicationId>
+            <dbt:beneficiaryAccount>918020045189201</dbt:beneficiaryAccount>
+            <dbt:ifscCode>SBIN0001423</dbt:ifscCode>
+            <dbt:amount>50000.00</dbt:amount>
+            <dbt:currency>INR</dbt:currency>
+        </dbt:disburseGrantRequest>
+    </soap:Body>
+</soap:Envelope>

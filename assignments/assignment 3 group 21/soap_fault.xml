@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:dbt="urn:dbtbank:payments">
+    <soap:Body>
+        <soap:Fault>
+            <faultcode>soap:Client</faultcode>
+            <faultstring>Beneficiary bank account details validation failed.</faultstring>
+            <detail>
+                <dbt:disburseGrantFault>
+                    <dbt:errorCode>ACC_NOT_FOUND</dbt:errorCode>
+                    <dbt:errorMessage>The provided IFSC code or account number is invalid/inactive.</dbt:errorMessage>
+                </dbt:disburseGrantFault>
+            </detail>
+        </soap:Fault>
+    </soap:Body>
+</soap:Envelope>

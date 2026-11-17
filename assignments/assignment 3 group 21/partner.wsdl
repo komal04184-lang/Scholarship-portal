@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions name="DBTBankService"
+             targetNamespace="urn:dbtbank:payments"
+             xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+             xmlns:tns="urn:dbtbank:payments"
+             xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+
+    <types>
+        <xsd:schema targetNamespace="urn:dbtbank:payments" elementFormDefault="qualified">
+            
+            <xsd:element name="disburseGrantRequest">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="applicationId" type="xsd:integer"/>
+                        <xsd:element name="beneficiaryAccount" type="xsd:string"/>
+                        <xsd:element name="ifscCode" type="xsd:string"/>
+                        <xsd:element name="amount" type="xsd:decimal"/>
+                        <xsd:element name="currency" type="xsd:string"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+
+            <xsd:element name="disburseGrantResponse">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="transactionReference" type="xsd:string"/>
+                        <xsd:element name="disbursementStatus" type="xsd:string"/>
+                        <xsd:element name="processedTimestamp" type="xsd:dateTime"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+
+            <xsd:element name="disburseGrantFault">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="errorCode" type="xsd:string"/>
+                        <xsd:element name="errorMessage" type="xsd:string"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+
+        </xsd:schema>
+    </types>
+
+    <message name="disburseGrantInput">
+        <part name="parameters" element="tns:disburseGrantRequest"/>
+    </message>
+
+    <message name="disburseGrantOutput">
+        <part name="parameters" element="tns:disburseGrantResponse"/>
+    </message>
+
+    <message name="disburseGrantFaultMessage">
+        <part name="fault" element="tns:disburseGrantFault"/>
+    </message>
+
+    <portType name="DBTBankPortType">
+        <operation name="disburseGrant">
+            <input message="tns:disburseGrantInput"/>
+            <output message="tns:disburseGrantOutput"/>
+            <fault name="GrantDisbursementFault" message="tns:disburseGrantFaultMessage"/>
+        </operation>
+    </portType>
+
+    <binding name="DBTBankSOAPBinding" type="tns:DBTBankPortType">
+        <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+        <operation name="disburseGrant">
+            <soap:operation soapAction="urn:dbtbank:payments/disburseGrant"/>
+            <input>
+                <soap:body use="literal"/>
+            </input>
+            <output>
+                <soap:body use="literal"/>
+            </output>
+            <fault name="GrantDisbursementFault">
+                <soap:fault name="GrantDisbursementFault" use="literal"/>
+            </fault>
+        </operation>
+    </binding>
+
+    <service name="DBTBankGateway">
+        <port name="DBTBankSOAPPort" binding="tns:DBTBankSOAPBinding">
+            <soap:address location="https://api.dbtbank.gov.in/dbt/v1/disburse"/>
+        </port>
+    </service>
+
+</definitions>

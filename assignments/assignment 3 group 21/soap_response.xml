@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:dbt="urn:dbtbank:payments">
+    <soap:Body>
+        <dbt:disburseGrantResponse>
+            <dbt:transactionReference>TXN-DBT-20261013-884920</dbt:transactionReference>
+            <dbt:disbursementStatus>SUCCESSFUL</dbt:disbursementStatus>
+            <dbt:processedTimestamp>2026-10-13T10:30:00Z</dbt:processedTimestamp>
+        </dbt:disburseGrantResponse>
+    </soap:Body>
+</soap:Envelope>
