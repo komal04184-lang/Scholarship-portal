@@ -8,11 +8,11 @@ const env = {
 
   postgres: {
     connectionString: process.env.DATABASE_URL || null,
-    host: process.env.DB_HOST || process.env.PGHOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || process.env.PGPORT, 10) || 5432,
-    database: process.env.DB_NAME || process.env.PGDATABASE || 'application_db',
-    user: process.env.DB_USER || process.env.PGUSER || 'postgres',
-    password: process.env.DB_PASSWORD || process.env.PGPASSWORD || 'Kom@l007',
+    host: process.env.DB_HOST || process.env.PGHOST,
+    port: parseInt(process.env.DB_PORT || process.env.PGPORT, 10),
+    database: process.env.DB_NAME || process.env.PGDATABASE,
+    user: process.env.DB_USER || process.env.PGUSER,
+    password: process.env.DB_PASSWORD || process.env.PGPASSWORD,
     schema: process.env.PG_SCHEMA || 'public',
     max: parseInt(process.env.PG_POOL_MAX, 10) || 20,
     idleTimeoutMillis: 30000,
