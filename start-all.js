@@ -4,6 +4,7 @@
  */
 const { spawn } = require('child_process');
 const path = require('path');
+const { cwd } = require('process');
 
 const rootDir = __dirname;
 
@@ -49,6 +50,14 @@ const services = [
     args: ['src/server.js'],
   },
   {
+    name: 'Payment',
+    port: 3005,
+    color: '\x1b[32m', //Green
+    cwd: path.join(rootDir, 'services', 'payment-service'),
+    cmd: 'node',
+    args: ['src/server.js'],
+  },
+  {
     name: 'Client',
     port: 5173,
     color: '\x1b[32;1m', // Bright Green
@@ -68,6 +77,7 @@ console.log('  • Identity Service  : http://localhost:3001');
 console.log('  • Scholarship Serv. : http://localhost:3002');
 console.log('  • Application Serv. : http://localhost:3003');
 console.log('  • Review Service    : http://localhost:3004');
+console.log('  • Payment Service   : http://localhost:3005');
 console.log('  • React Vite Client : http://localhost:5173');
 console.log('='.repeat(70) + '\n');
 
@@ -109,7 +119,7 @@ function cleanup() {
   runningProcesses.forEach((p) => {
     try {
       p.kill();
-    } catch (_) {}
+    } catch (_) { }
   });
   process.exit(0);
 }

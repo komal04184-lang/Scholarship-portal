@@ -3,6 +3,7 @@ const router = express.Router();
 const ApplicationController = require('../controllers/applicationController');
 const { authenticate, authorize } = require('../middleware/authMiddleware');
 const { requireApplicationOwnership } = require('../middleware/accessControlMiddleware');
+const { triggerScholarshipDisbursement } = require('../services/paymentClient');
 const upload = require('../middleware/uploadMiddleware');
 const validate = require('../middleware/validateMiddleware');
 const {
@@ -98,6 +99,50 @@ router.patch(
   validate(verifyDocumentSchema),
   ApplicationController.verifyDocument
 );
+
+// Update application status and trigger payout on APPROVED
+router.patch('/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const { status, approvedAmount } = req.body;
+
+  try {
+    // 1. Find and update the application in your database
+    // (Use Mongoose findByIdAndUpdate if application-service uses MongoDB, or your SQL query)
+    const application = await Application.findByIdAndUpdate(
+      id,
+      { status, ...(approvedAmount && { approvedAmount }) },
+      { new: true }
+    );
+
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    // 2. Trigger disbursement in payment-service if approved
+    let disbursement = null;
+    if (status === 'APPROVED') {
+      try {
+        disbursement = await triggerScholarshipDisbursement({
+          applicationId: String(application._id || application.id),
+          studentId: String(application.studentId),
+          scholarshipId: String(application.scholarshipId),
+          amount: approvedAmount || application.approvedAmount || application.amount || 10000,
+          installmentNo: 1
+        });
+      } catch (err) {
+        console.error('[Application Service] Disbursement trigger failed:', err.response?.data || err.message);
+      }
+    }
+
+    return res.status(200).json({
+      message: `Application status updated to ${status}`,
+      application,
+      disbursement
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to update status', details: err.message });
+  }
+});
 
 module.exports = router;
 
