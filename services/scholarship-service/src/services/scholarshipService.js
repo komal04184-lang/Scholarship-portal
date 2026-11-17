@@ -9,6 +9,7 @@ function normalize(row) {
   let minCgpa = null;
   let minPercentage = null;
   let maxIncome = null;
+  let department = row.department || null;
 
   for (const c of rawCriteria) {
     const type = (c.criterion_type || '').toLowerCase();
@@ -22,12 +23,15 @@ function normalize(row) {
       }
     } else if (type.includes('income')) {
       maxIncome = Number(val);
+    } else if (type.includes('department') || type.includes('branch')) {
+      department = typeof val === 'string' ? val : (val?.value || String(val));
     }
   }
 
   // Handle explicit overrides if present on row
   if (row.min_cgpa !== undefined && row.min_cgpa !== null) minCgpa = Number(row.min_cgpa);
   if (row.max_income !== undefined && row.max_income !== null) maxIncome = Number(row.max_income);
+  if (row.department) department = row.department;
 
   const rawStatus = (row.status || 'published').toLowerCase();
   const normalizedStatus = (rawStatus === 'published' || rawStatus === 'active') ? 'open' : rawStatus;
@@ -57,7 +61,7 @@ function normalize(row) {
     min_percentage: minPercentage,
     max_income: maxIncome,
     total_slots: row.total_slots ? Number(row.total_slots) : null,
-    department: row.department || null,
+    department: department,
     eligibility_criteria: rawCriteria.map(c => ({
       criterion_id: c.criterion_id,
       criterion_type: c.criterion_type,
@@ -148,10 +152,11 @@ async function list(filters = {}) {
   };
 
   if (filters.category) {
-    add('(LOWER(c.category_name) = LOWER(?) OR s.category_id::text = ?)', filters.category);
-    // Duplicate value for second placeholder
+    values.push(`%${filters.category}%`);
+    const p1 = `$${values.length}`;
     values.push(filters.category);
-    where[where.length - 1] = `(LOWER(c.category_name) = LOWER($${values.length - 1}) OR s.category_id::text = $${values.length})`;
+    const p2 = `$${values.length}`;
+    where.push(`(c.category_name ILIKE ${p1} OR s.category_id::text = ${p2})`);
   }
 
   if (filters.status) {
@@ -161,6 +166,8 @@ async function list(filters = {}) {
     } else {
       add('s.status = ?', filters.status);
     }
+  } else if (!filters.includeArchived && !filters.admin) {
+    where.push("s.status != 'archived'");
   }
 
   if (filters.search) {
@@ -245,19 +252,24 @@ async function create(data) {
   try {
     await client.query('BEGIN');
 
-    // Resolve category_id
+    // Resolve category_id safely
     let categoryId = data.category_id;
-    if (!categoryId && data.category) {
+    if (!categoryId && (data.category || data.category_name)) {
+      const catInput = (data.category || data.category_name).trim();
       const catRes = await client.query(
-        'SELECT category_id FROM scholarship_categories WHERE LOWER(category_name) = LOWER($1)',
-        [data.category.trim()]
+        `SELECT category_id, category_name FROM scholarship_categories 
+         WHERE LOWER(category_name) = LOWER($1) 
+            OR LOWER(category_name) = LOWER($2) 
+            OR LOWER(category_name) LIKE LOWER($3)
+         ORDER BY category_id ASC LIMIT 1`,
+        [catInput, `${catInput} Based`, `%${catInput}%`]
       );
       if (catRes.rows.length) {
         categoryId = catRes.rows[0].category_id;
       } else {
         const newCat = await client.query(
           'INSERT INTO scholarship_categories (category_name, description) VALUES ($1, $2) RETURNING category_id',
-          [data.category.trim(), `${data.category} scholarships`]
+          [catInput.includes('Based') ? catInput : `${catInput} Based`, `${catInput} scholarships`]
         );
         categoryId = newCat.rows[0].category_id;
       }
@@ -267,6 +279,10 @@ async function create(data) {
     const amount = Number(data.award_amount ?? data.amount ?? 0);
     const deadline = data.application_end_date || data.deadline;
     const code = data.scholarship_code || `SCH-${Date.now().toString(36).toUpperCase()}`;
+    const totalSlots = data.total_slots ? Number(data.total_slots) : (data.seats ? Number(data.seats) : null);
+    const minCgpa = data.min_cgpa !== undefined && data.min_cgpa !== null ? data.min_cgpa : data.min_gpa;
+    const maxIncome = data.max_income !== undefined && data.max_income !== null ? data.max_income : null;
+    const department = data.department || null;
 
     // Map status: DB requires ('draft', 'published', 'closed', 'archived')
     let dbStatus = (data.status || 'published').toLowerCase();
@@ -293,7 +309,7 @@ async function create(data) {
       amount,
       data.currency || 'INR',
       data.academic_year || '2026-2027',
-      data.total_slots ? Number(data.total_slots) : null,
+      totalSlots,
       data.application_start_date || new Date().toISOString().split('T')[0],
       deadline,
       dbStatus,
@@ -314,22 +330,45 @@ async function create(data) {
           mandatory: c.is_mandatory !== false
         });
       }
-    } else {
-      if (data.min_cgpa !== undefined && data.min_cgpa !== null) {
+    }
+
+    // Ensure min_cgpa is preserved
+    if (minCgpa !== undefined && minCgpa !== null && minCgpa !== "") {
+      const exists = criteriaToInsert.some(c => (c.type || '').includes('cgpa'));
+      if (!exists) {
         criteriaToInsert.push({
           type: 'minimum_cgpa',
           op: '>=',
-          val: { value: Number(data.min_cgpa) },
-          desc: `Minimum CGPA of ${data.min_cgpa}`,
+          val: { value: Number(minCgpa) },
+          desc: `Minimum CGPA of ${minCgpa}`,
           mandatory: true
         });
       }
-      if (data.max_income !== undefined && data.max_income !== null) {
+    }
+
+    // Ensure max_income is preserved
+    if (maxIncome !== undefined && maxIncome !== null && maxIncome !== "") {
+      const exists = criteriaToInsert.some(c => (c.type || '').includes('income'));
+      if (!exists) {
         criteriaToInsert.push({
           type: 'annual_family_income',
           op: '<=',
-          val: { value: Number(data.max_income) },
-          desc: `Annual family income up to ₹${data.max_income}`,
+          val: { value: Number(maxIncome) },
+          desc: `Annual family income up to ₹${maxIncome}`,
+          mandatory: true
+        });
+      }
+    }
+
+    // Ensure department is preserved
+    if (department) {
+      const exists = criteriaToInsert.some(c => (c.type || '').includes('department'));
+      if (!exists) {
+        criteriaToInsert.push({
+          type: 'department',
+          op: '=',
+          val: { value: String(department).trim() },
+          desc: `Eligible Department: ${String(department).trim()}`,
           mandatory: true
         });
       }
@@ -348,12 +387,13 @@ async function create(data) {
     const docsToInsert = [];
     if (Array.isArray(data.required_documents) && data.required_documents.length > 0) {
       for (const d of data.required_documents) {
+        const docName = typeof d === 'string' ? d : (d.document_name || d.name || 'Document');
         docsToInsert.push({
-          name: d.document_name || d.name || 'Document',
-          desc: d.description || '',
-          mandatory: d.is_mandatory !== false,
-          types: d.allowed_file_types || ['pdf', 'jpg', 'jpeg', 'png'],
-          maxSize: d.max_file_size_mb || 5
+          name: docName,
+          desc: typeof d === 'object' && d.description ? d.description : `Valid ${docName} submission`,
+          mandatory: typeof d === 'object' && d.is_mandatory !== undefined ? d.is_mandatory : true,
+          types: typeof d === 'object' && d.allowed_file_types ? d.allowed_file_types : ['pdf', 'jpg', 'jpeg', 'png'],
+          maxSize: typeof d === 'object' && d.max_file_size_mb ? d.max_file_size_mb : 5
         });
       }
     } else {
@@ -411,11 +451,31 @@ async function update(id, data) {
   return await getById(id);
 }
 
-async function updateStatus(id, status) {
-  let dbStatus = status.toLowerCase();
+async function updateStatus(id, status, user = null, remarks = '') {
+  let dbStatus = String(status || '').toLowerCase();
   if (dbStatus === 'open' || dbStatus === 'active') dbStatus = 'published';
-  if (!['draft', 'published', 'closed', 'archived'].includes(dbStatus)) {
-    throw new Error(`Invalid status: ${status}. Must be draft, published, closed, or archived.`);
+  const allowed = ['draft', 'published', 'paused', 'closed', 'archived'];
+  if (!allowed.includes(dbStatus)) {
+    throw new Error(`Invalid status: ${status}. Must be draft, published, paused, closed, or archived.`);
+  }
+
+  const current = await getById(id);
+  if (!current) return null;
+
+  // Deadline check when resuming
+  if (dbStatus === 'published') {
+    const deadlineStr = current.application_end_date || current.deadline;
+    if (deadlineStr) {
+      const deadlineDate = new Date(deadlineStr);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(deadlineStr).trim())) {
+        deadlineDate.setHours(23, 59, 59, 999);
+      }
+      if (deadlineDate.getTime() < Date.now()) {
+        const err = new Error(`Cannot resume an expired scholarship. The application deadline (${deadlineStr}) has already passed. Please update the deadline first.`);
+        err.statusCode = 400;
+        throw err;
+      }
+    }
   }
 
   const result = await db.query(
@@ -423,10 +483,57 @@ async function updateStatus(id, status) {
     [dbStatus, id]
   );
   if (!result.rows[0]) return null;
+
+  // Record status history
+  try {
+    await db.query(
+      `INSERT INTO scholarship_status_history (scholarship_id, old_status, new_status, changed_by, remarks, changed_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [id, current.raw_status || current.status, dbStatus, user?.email || user?.username || 'admin', remarks || `Status changed to ${dbStatus}`]
+    );
+  } catch (histErr) {
+    console.warn('Status history insert warning:', histErr.message);
+  }
+
+  // Record audit log
+  try {
+    await db.query(
+      `INSERT INTO scholarship_audit_logs (scholarship_id, action, performed_by, details, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [id, `STATUS_${dbStatus.toUpperCase()}`, user?.email || user?.username || 'admin', JSON.stringify({ old_status: current.status, new_status: dbStatus, remarks })]
+    );
+  } catch (auditErr) {
+    console.warn('Audit log insert warning:', auditErr.message);
+  }
+
   return await getById(id);
 }
 
 async function remove(id) {
+  // Check if applications exist for this scholarship (preserves references and audit logs)
+  let hasApplications = false;
+  try {
+    const appRes = await fetch(`http://localhost:3003/api/v1/applications/admin/all?scholarship_id=${id}&limit=10`, {
+      headers: {
+        'X-Service-Token': process.env.INTERNAL_SERVICE_TOKEN || 'internal_super_secret_token_change_in_prod',
+      },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (appRes.ok) {
+      const appData = await appRes.json();
+      const apps = appData.data?.applications || appData.applications || appData.data || [];
+      hasApplications = Array.isArray(apps) && apps.length > 0;
+    }
+  } catch (_) {
+    // If application service call fails, query safely
+  }
+
+  if (hasApplications) {
+    // Safely auto-archive instead of breaking foreign references
+    await updateStatus(id, 'archived', null, 'Auto-archived because associated student applications exist');
+    return { archived: true, message: 'Scholarship has associated student applications and has been safely archived.' };
+  }
+
   const client = await db.getClient();
   try {
     await client.query('BEGIN');

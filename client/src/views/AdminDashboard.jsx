@@ -19,11 +19,20 @@ import {
   RefreshCw,
   CheckSquare,
   FileCheck,
+  Eye,
+  Download,
+  Pause,
+  Play,
+  Archive,
+  Trash2,
+  X,
+  GraduationCap,
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge';
 import {
   getAdminMetrics,
   getAdminApplications,
+  getStudentProfileById,
   updateApplicationStatus,
   createScholarship,
   checkSystemHealth,
@@ -33,10 +42,17 @@ import {
   verifyReviewDocuments,
   updateReviewEligibility,
   submitReviewDecision,
+  getApplicationDocuments,
+  downloadDocumentFile,
+  fetchDocumentBlob,
+  pauseScholarship,
+  resumeScholarship,
+  archiveScholarship,
+  deleteScholarship,
 } from '../services/api';
 
 export default function AdminDashboard({ user }) {
-  const [activeTab, setActiveTab] = useState('applications'); // 'applications', 'scholarships', 'health'
+  const [activeTab, setActiveTab] = useState('scholarships'); // 'scholarships', 'applications', 'health'
   const [metrics, setMetrics] = useState(null);
   const [applications, setApplications] = useState([]);
   const [scholarships, setScholarships] = useState([]);
@@ -54,9 +70,15 @@ export default function AdminDashboard({ user }) {
   // Review Service state
   const [currentReview, setCurrentReview] = useState(null);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [adminDocs, setAdminDocs] = useState([]);
+  const [adminDocsLoading, setAdminDocsLoading] = useState(false);
+  const [selectedStudentProfile, setSelectedStudentProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   // Create Scholarship modal state
   const [isCreatingScholarship, setIsCreatingScholarship] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [createLoading, setCreateLoading] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newCategory, setNewCategory] = useState('Merit');
   const [newDept, setNewDept] = useState('Engineering & Technology');
@@ -65,7 +87,7 @@ export default function AdminDashboard({ user }) {
   const [newMinGpa, setNewMinGpa] = useState('8.0');
   const [newMaxIncome, setNewMaxIncome] = useState('750000');
   const [newDeadline, setNewDeadline] = useState('2026-12-31');
-  const [newDescription, setNewDescription] = useState('');
+  const [newDescription, setNewDescription] = useState('Financial grant for meritorious students with exceptional academic standing.');
 
   useEffect(() => {
     loadAllData();
@@ -74,10 +96,121 @@ export default function AdminDashboard({ user }) {
   useEffect(() => {
     if (selectedApp) {
       loadReviewForApp(selectedApp);
+      loadAdminDocs(selectedApp);
+      loadStudentProfile(selectedApp);
     } else {
       setCurrentReview(null);
+      setAdminDocs([]);
+      setSelectedStudentProfile(null);
     }
-  }, [selectedApp?.id, selectedApp?.raw_id]);
+  }, [selectedApp?.id, selectedApp?.raw_id, selectedApp?.student_id]);
+
+  const loadStudentProfile = async (app) => {
+    if (!app?.student_id) {
+      setSelectedStudentProfile(null);
+      return;
+    }
+    setProfileLoading(true);
+    try {
+      const prof = await getStudentProfileById(app.student_id);
+      setSelectedStudentProfile(prof);
+    } catch (e) {
+      console.warn('Could not load student profile for admin:', e);
+      setSelectedStudentProfile(null);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const loadAdminDocs = async (app) => {
+    setAdminDocsLoading(true);
+    try {
+      const targetId = app.id || app.raw_id;
+      const docs = await getApplicationDocuments(targetId);
+      setAdminDocs(Array.isArray(docs) ? docs : []);
+    } catch (e) {
+      console.warn('Could not load application documents for admin:', e);
+      setAdminDocs([]);
+    } finally {
+      setAdminDocsLoading(false);
+    }
+  };
+
+  const [previewModalDoc, setPreviewModalDoc] = useState(null);
+
+  const getAppCountForScholarship = (sId) => {
+    return applications.filter((a) => String(a.scholarship_id) === String(sId)).length;
+  };
+
+  const handlePauseScholarship = async (scholarship) => {
+    const sId = scholarship.scholarship_id || scholarship.id;
+    if (!window.confirm(`Are you sure you want to PAUSE "${scholarship.title || scholarship.name}"?\n\nNew student applications will be blocked while paused.`)) {
+      return;
+    }
+    try {
+      await pauseScholarship(sId);
+      alert(`Scholarship #${sId} has been paused.`);
+      loadAllData();
+    } catch (e) {
+      alert(`Failed to pause scholarship: ${e.message}`);
+    }
+  };
+
+  const handleResumeScholarship = async (scholarship) => {
+    const sId = scholarship.scholarship_id || scholarship.id;
+    if (!window.confirm(`Resume accepting student applications for "${scholarship.title || scholarship.name}"?`)) {
+      return;
+    }
+    try {
+      await resumeScholarship(sId);
+      alert(`Scholarship #${sId} is now active and published.`);
+      loadAllData();
+    } catch (e) {
+      alert(`Failed to resume scholarship: ${e.message}`);
+    }
+  };
+
+  const handleArchiveOrDeleteScholarship = async (scholarship) => {
+    const sId = scholarship.scholarship_id || scholarship.id;
+    const count = getAppCountForScholarship(sId);
+    let promptMsg = `Archive or Delete "${scholarship.title || scholarship.name}"?`;
+    if (count > 0) {
+      promptMsg = `"${scholarship.title || scholarship.name}" has ${count} associated student application(s).\n\nTo preserve historical applicant records and audit integrity, this scholarship will be safely ARCHIVED and hidden from the active catalogue.\n\nProceed with archiving?`;
+    } else {
+      promptMsg = `"${scholarship.title || scholarship.name}" has no applications. Are you sure you want to delete/archive it?`;
+    }
+    if (!window.confirm(promptMsg)) return;
+
+    try {
+      const res = await archiveScholarship(sId);
+      alert(res.message || `Scholarship #${sId} has been safely archived.`);
+      loadAllData();
+    } catch (e) {
+      alert(`Action failed: ${e.message}`);
+    }
+  };
+
+  const handleAdminDocAction = async (doc, isPreview) => {
+    try {
+      const appId = selectedApp.id || selectedApp.raw_id;
+      const docId = doc.id || doc.application_document_id;
+      const filename = doc.original_filename || doc.name || 'document.pdf';
+      if (isPreview) {
+        const blob = await fetchDocumentBlob(appId, docId, true);
+        const url = window.URL.createObjectURL(blob);
+        setPreviewModalDoc({
+          url,
+          filename,
+          mimeType: doc.mime_type || blob.type,
+          isPdf: (doc.mime_type || blob.type).includes('pdf') || filename.toLowerCase().endsWith('.pdf')
+        });
+      } else {
+        await downloadDocumentFile(appId, docId, filename, false);
+      }
+    } catch (err) {
+      alert(`Could not ${isPreview ? 'view' : 'download'} document: ${err.message}`);
+    }
+  };
 
   const loadReviewForApp = async (app) => {
     setReviewLoading(true);
@@ -214,27 +347,61 @@ export default function AdminDashboard({ user }) {
 
   const handleCreateScholarship = async (e) => {
     e.preventDefault();
+    setCreateError('');
+    if (!newTitle.trim()) {
+      setCreateError('Scholarship title is required (minimum 3 characters).');
+      return;
+    }
+    if (!newDescription.trim()) {
+      setCreateError('Scholarship description is required.');
+      return;
+    }
+    if (!newAmount || Number(newAmount) <= 0) {
+      setCreateError('Grant value must be a positive number.');
+      return;
+    }
+    if (!newDeadline) {
+      setCreateError('Application deadline is required.');
+      return;
+    }
+    if (newMinGpa && (Number(newMinGpa) < 0 || Number(newMinGpa) > 10)) {
+      setCreateError('Minimum CGPA must be between 0 and 10.');
+      return;
+    }
+
+    setCreateLoading(true);
     try {
       await createScholarship({
-        title: newTitle,
+        title: newTitle.trim(),
+        name: newTitle.trim(),
         category: newCategory,
-        department: newDept,
+        category_name: newCategory,
+        department: newDept.trim(),
         amount: parseInt(newAmount, 10),
+        award_amount: parseInt(newAmount, 10),
         total_slots: parseInt(newSlots, 10),
+        seats: parseInt(newSlots, 10),
         min_gpa: parseFloat(newMinGpa),
+        min_cgpa: parseFloat(newMinGpa),
         max_income: parseInt(newMaxIncome, 10),
-        deadline: new Date(newDeadline).toISOString(),
-        description: newDescription,
+        deadline: newDeadline,
+        application_end_date: newDeadline,
+        description: newDescription.trim(),
         required_documents: ['Transcripts', 'Income Certificate', 'Recommendation'],
       });
 
-      alert('New scholarship created successfully!');
+      alert('New scholarship published successfully!');
       setIsCreatingScholarship(false);
-      // reload
-      const schols = await getScholarships();
+      setNewTitle('');
+      setNewDescription('Financial grant for meritorious students with exceptional academic standing.');
+      setCreateError('');
+      // Reload scholarships list
+      const schols = await getScholarships({ status: 'ALL' });
       setScholarships(schols);
     } catch (err) {
-      alert('Error creating scholarship: ' + err.message);
+      setCreateError(err.message || 'Error creating scholarship');
+    } finally {
+      setCreateLoading(false);
     }
   };
 
@@ -433,7 +600,7 @@ export default function AdminDashboard({ user }) {
                     </div>
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      <span>CGPA: <strong style={{ color: '#34D399' }}>{a.cgpa}</strong> · Income: ₹{(a.income / 100000).toFixed(1)}L</span>
+                      <span>CGPA: <strong style={{ color: a.cgpa !== null && a.cgpa !== undefined ? '#34D399' : 'var(--text-muted)' }}>{a.cgpa !== null && a.cgpa !== undefined ? a.cgpa : 'N/A'}</strong> · Income: {a.income !== null && a.income !== undefined ? `₹${(a.income / 100000).toFixed(1)}L` : 'Not Provided'}</span>
                       <span>Award: <strong style={{ color: 'var(--text-primary)' }}>₹{a.amount.toLocaleString()}</strong></span>
                     </div>
                   </div>
@@ -444,7 +611,21 @@ export default function AdminDashboard({ user }) {
 
           {/* Selected Applicant Scrutiny Details & Action Desk */}
           <div>
-            {selectedApp ? (
+            {selectedApp ? (() => {
+              const studentProfile = selectedStudentProfile || selectedApp?.student_profile || {};
+              const acad = studentProfile.academic_details || {};
+
+              const fullName = studentProfile.username || selectedApp.applicant_name || 'Not Provided';
+              const rollNumber = studentProfile.enrollment_no || selectedApp.enrollment_no || (selectedApp.student_id ? `STU-${String(selectedApp.student_id).slice(-6).toUpperCase()}` : 'Not Provided');
+              const university = acad.institution_name || studentProfile.institution_name || selectedApp.university || 'Not Provided';
+              const department = acad.branch || acad.course || selectedApp.department || 'Not Provided';
+              const degreeLevel = acad.course || selectedApp.degree_level || selectedApp.course || 'Not Provided';
+              const semesterYear = acad.semester ? `Semester ${acad.semester} (Year ${Math.ceil(acad.semester / 2)})` : (selectedApp.semester ? `Semester ${selectedApp.semester}` : 'Not Provided');
+              const displayCgpa = (acad.cgpa !== null && acad.cgpa !== undefined) ? acad.cgpa : (selectedApp.cgpa !== null && selectedApp.cgpa !== undefined ? selectedApp.cgpa : null);
+              const displayIncome = (studentProfile.family_income !== null && studentProfile.family_income !== undefined) ? Number(studentProfile.family_income) : (selectedApp.income !== null && selectedApp.income !== undefined ? Number(selectedApp.income) : null);
+              const academicYear = acad.academic_year || selectedApp.academic_year || 'Not Provided';
+
+              return (
               <div className="glass-panel" style={{ padding: '1.75rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
                   <div>
@@ -452,41 +633,163 @@ export default function AdminDashboard({ user }) {
                       SCRUTINY DESK #{selectedApp.id}
                     </span>
                     <h3 style={{ fontSize: '1.35rem', color: 'var(--text-primary)', marginTop: '0.2rem' }}>
-                      {selectedApp.applicant_name}
+                      {fullName}
                     </h3>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      {selectedApp.email} · {selectedApp.student_uid}
+                      {studentProfile.email || selectedApp.email || 'No email'} · {rollNumber}
                     </div>
                   </div>
                   <StatusBadge status={selectedApp.status} size="lg" />
                 </div>
 
-                {/* Academic & Financial Verification Summary */}
+                {/* Authentic Academic & Student Information Verification Card */}
+                <div style={{
+                  background: 'rgba(15, 23, 42, 0.7)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '1.25rem',
+                  border: '1px solid var(--border-subtle)',
+                  marginBottom: '1.25rem',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.6rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <GraduationCap size={18} color="#818CF8" />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Student Academic & Profile Verification
+                      </span>
+                    </div>
+                    {profileLoading && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Loading authentic profile...</span>
+                    )}
+                  </div>
+
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: '0.85rem',
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Student Full Name</div>
+                      <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)' }}>{fullName}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Student ID / Roll No</div>
+                      <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'monospace' }}>{rollNumber}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>University / Institution</div>
+                      <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)' }}>{university}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Department / Branch</div>
+                      <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)' }}>{department}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Degree Level / Course</div>
+                      <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)' }}>{degreeLevel}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Current Semester / Year</div>
+                      <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)' }}>{semesterYear}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Cumulative CGPA</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 700, color: displayCgpa !== null ? '#34D399' : 'var(--text-muted)' }}>
+                        {displayCgpa !== null ? `${displayCgpa} / 10.0` : 'Not Provided'}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Family Annual Income</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 700, color: displayIncome !== null ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                        {displayIncome !== null ? `₹${displayIncome.toLocaleString('en-IN')}` : 'Not Provided'}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Academic Year</div>
+                      <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#818CF8' }}>{academicYear}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Target Grant Award</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#818CF8' }}>₹{selectedApp.amount.toLocaleString()}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Uploaded Verification Documents (Application Service) */}
                 <div style={{
                   background: 'rgba(15, 23, 42, 0.6)',
                   borderRadius: 'var(--radius-md)',
-                  padding: '1rem',
+                  padding: '1.25rem',
                   border: '1px solid var(--border-subtle)',
                   marginBottom: '1.25rem',
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '0.75rem',
                 }}>
-                  <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Cumulative CGPA</div>
-                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#34D399' }}>{selectedApp.cgpa} / 10.0</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <FileText size={16} color="#06B6D4" />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase' }}>
+                        Attached Documents ({adminDocs.length})
+                      </span>
+                    </div>
+                    {adminDocsLoading && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Loading documents...</span>
+                    )}
                   </div>
-                  <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Annual Family Income</div>
-                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>₹{selectedApp.income.toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Target Grant</div>
-                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#818CF8' }}>₹{selectedApp.amount.toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Attached Documents</div>
-                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#06B6D4' }}>{selectedApp.documents_count || 3} Files</div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    {adminDocs.map((doc, idx) => {
+                      const docName = doc.original_filename || doc.document_type || doc.name || `Document ${idx + 1}`;
+                      const isVerified = doc.verification_status === 'VERIFIED';
+                      const isRejected = doc.verification_status === 'REJECTED';
+
+                      return (
+                        <div
+                          key={doc.id || doc.application_document_id || idx}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '0.6rem 0.85rem',
+                            background: 'rgba(255, 255, 255, 0.03)',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-subtle)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                            <FileText size={18} color="#38BDF8" />
+                            <div>
+                              <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                                {docName}
+                              </div>
+                              <div style={{ fontSize: '0.72rem', color: isVerified ? '#34D399' : isRejected ? '#F87171' : 'var(--text-muted)' }}>
+                                {doc.mime_type || ''} {doc.file_size_bytes ? `· ${(doc.file_size_bytes / 1024).toFixed(1)} KB` : ''} · {isVerified ? '✓ Verified' : isRejected ? '✕ Rejected' : 'Pending Verification'}
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.4rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleAdminDocAction(doc, true)}
+                              className="btn btn-secondary btn-sm"
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                              title="Preview Document in Browser"
+                            >
+                              <Eye size={12} /> View
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleAdminDocAction(doc, false)}
+                              className="btn btn-secondary btn-sm"
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                              title="Download File"
+                            >
+                              <Download size={12} /> Download
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {!adminDocsLoading && adminDocs.length === 0 && (
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No documents uploaded for this application.</span>
+                    )}
                   </div>
                 </div>
 
@@ -539,55 +842,85 @@ export default function AdminDashboard({ user }) {
                               Document Verification
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                              {(currentReview.documents || []).map((doc, idx) => (
-                                <div
-                                  key={idx}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    background: 'rgba(15, 23, 42, 0.5)',
-                                    padding: '0.5rem 0.75rem',
-                                    borderRadius: 'var(--radius-sm)',
-                                    border: '1px solid var(--border-subtle)',
-                                  }}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <FileText size={15} color="var(--text-muted)" />
-                                    <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>{doc.name}</span>
+                              {(currentReview.documents || []).map((doc, idx) => {
+                                const matchedAdminDoc = adminDocs.find((ad) => {
+                                  const adName = (ad.original_filename || ad.name || ad.document_name || '').toLowerCase();
+                                  const dName = (doc.name || '').toLowerCase();
+                                  return adName.includes(dName) || dName.includes(adName);
+                                }) || (adminDocs.length > 0 ? adminDocs[idx % adminDocs.length] : null);
+
+                                return (
+                                  <div
+                                    key={idx}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      background: 'rgba(15, 23, 42, 0.5)',
+                                      padding: '0.5rem 0.75rem',
+                                      borderRadius: 'var(--radius-sm)',
+                                      border: '1px solid var(--border-subtle)',
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                      <FileText size={15} color="var(--text-muted)" />
+                                      <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>{doc.name}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                      {matchedAdminDoc && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAdminDocAction(matchedAdminDoc, true)}
+                                            className="btn btn-secondary btn-sm"
+                                            style={{ padding: '0.2rem 0.45rem', fontSize: '0.7rem' }}
+                                            title="Preview Document in Browser"
+                                          >
+                                            <Eye size={12} />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAdminDocAction(matchedAdminDoc, false)}
+                                            className="btn btn-secondary btn-sm"
+                                            style={{ padding: '0.2rem 0.45rem', fontSize: '0.7rem' }}
+                                            title="Download Original File"
+                                          >
+                                            <Download size={12} />
+                                          </button>
+                                        </>
+                                      )}
+                                      <span style={{
+                                        fontSize: '0.7rem',
+                                        padding: '0.15rem 0.45rem',
+                                        borderRadius: '4px',
+                                        fontWeight: 600,
+                                        background: doc.status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.15)' : doc.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                                        color: doc.status === 'VERIFIED' ? '#34D399' : doc.status === 'REJECTED' ? '#F87171' : '#FBBF24',
+                                      }}>
+                                        {doc.status}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleVerifyDoc(doc.name, 'VERIFIED')}
+                                        className="btn btn-secondary btn-sm"
+                                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', color: '#34D399' }}
+                                        title="Mark Verified"
+                                      >
+                                        ✓ Verify
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleVerifyDoc(doc.name, 'REJECTED')}
+                                        className="btn btn-secondary btn-sm"
+                                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', color: '#F87171' }}
+                                        title="Mark Rejected"
+                                      >
+                                        ✗ Reject
+                                      </button>
+                                    </div>
                                   </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <span style={{
-                                      fontSize: '0.7rem',
-                                      padding: '0.15rem 0.45rem',
-                                      borderRadius: '4px',
-                                      fontWeight: 600,
-                                      background: doc.status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.15)' : doc.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                                      color: doc.status === 'VERIFIED' ? '#34D399' : doc.status === 'REJECTED' ? '#F87171' : '#FBBF24',
-                                    }}>
-                                      {doc.status}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleVerifyDoc(doc.name, 'VERIFIED')}
-                                      className="btn btn-secondary btn-sm"
-                                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', color: '#34D399' }}
-                                      title="Mark Verified"
-                                    >
-                                      ✓ Verify
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleVerifyDoc(doc.name, 'REJECTED')}
-                                      className="btn btn-secondary btn-sm"
-                                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', color: '#F87171' }}
-                                      title="Mark Rejected"
-                                    >
-                                      ✗ Reject
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
 
@@ -761,7 +1094,8 @@ export default function AdminDashboard({ user }) {
                   </div>
                 </div>
               </div>
-            ) : (
+            );
+          })() : (
               <div className="glass-panel" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                 Select an applicant from the queue to review credentials and update status.
               </div>
@@ -783,7 +1117,11 @@ export default function AdminDashboard({ user }) {
               </p>
             </div>
             <button
-              onClick={() => setIsCreatingScholarship(true)}
+              onClick={() => {
+                setIsCreatingScholarship(true);
+                setCreateError('');
+                if (!newDescription) setNewDescription('Financial grant for meritorious students with exceptional academic standing.');
+              }}
               className="btn btn-primary btn-sm"
             >
               <PlusCircle size={15} /> Add New Scholarship
@@ -801,6 +1139,8 @@ export default function AdminDashboard({ user }) {
                   <th style={{ padding: '0.75rem 1rem' }}>Min GPA</th>
                   <th style={{ padding: '0.75rem 1rem' }}>Deadline</th>
                   <th style={{ padding: '0.75rem 1rem' }}>Status</th>
+                  <th style={{ padding: '0.75rem 1rem' }}>Total Apps</th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -827,6 +1167,49 @@ export default function AdminDashboard({ user }) {
                     </td>
                     <td style={{ padding: '1rem' }}>
                       <StatusBadge status={s.status || 'ACTIVE'} />
+                    </td>
+                    <td style={{ padding: '1rem', fontWeight: 700, color: '#818CF8' }}>
+                      {getAppCountForScholarship(s.scholarship_id || s.id)}
+                    </td>
+                    <td style={{ padding: '1rem', textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                        {(s.status === 'open' || s.status === 'published' || s.status === 'active' || s.status === 'ACTIVE') && (
+                          <button
+                            type="button"
+                            onClick={() => handlePauseScholarship(s)}
+                            className="btn btn-secondary btn-sm"
+                            style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: '#F59E0B' }}
+                            title="Pause Scholarship Submissions"
+                          >
+                            <Pause size={12} /> Pause
+                          </button>
+                        )}
+                        {(s.status === 'paused' || s.status === 'PAUSED') && (
+                          <button
+                            type="button"
+                            onClick={() => handleResumeScholarship(s)}
+                            className="btn btn-primary btn-sm"
+                            style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                            title="Resume Scholarship Submissions"
+                          >
+                            <Play size={12} /> Resume
+                          </button>
+                        )}
+                        {s.status !== 'archived' && s.status !== 'ARCHIVED' && (
+                          <button
+                            type="button"
+                            onClick={() => handleArchiveOrDeleteScholarship(s)}
+                            className="btn btn-secondary btn-sm"
+                            style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: '#EF4444' }}
+                            title="Archive or Delete Scholarship"
+                          >
+                            <Archive size={12} /> Archive
+                          </button>
+                        )}
+                        {(s.status === 'archived' || s.status === 'ARCHIVED') && (
+                          <span style={{ fontSize: '0.72rem', color: '#94A3B8', fontStyle: 'italic' }}>Archived</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -921,6 +1304,24 @@ export default function AdminDashboard({ user }) {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 style={{ fontSize: '1.35rem', marginBottom: '1.25rem' }}>Create New Scholarship Program</h3>
+
+            {createError && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.75rem 1rem',
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '6px',
+                color: '#FCA5A5',
+                fontSize: '0.85rem',
+                marginBottom: '1rem',
+              }}>
+                <AlertCircle size={16} />
+                <span>{createError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleCreateScholarship} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
@@ -1024,10 +1425,11 @@ export default function AdminDashboard({ user }) {
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
-                  Description & Eligibility Scope
+                  Description & Eligibility Scope *
                 </label>
                 <textarea
                   rows={3}
+                  required
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
                   placeholder="Outline eligibility criteria and guidelines..."
@@ -1039,11 +1441,86 @@ export default function AdminDashboard({ user }) {
                 <button type="button" onClick={() => setIsCreatingScholarship(false)} className="btn btn-secondary">
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Publish Scholarship
+                <button type="submit" disabled={createLoading} className="btn btn-primary">
+                  {createLoading ? 'Publishing...' : 'Publish Scholarship'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Document In-App Preview Modal */}
+      {previewModalDoc && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          background: 'rgba(15, 23, 42, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '1.5rem',
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '1rem',
+            background: 'rgba(30, 41, 59, 0.95)',
+            padding: '0.75rem 1.25rem',
+            borderRadius: '8px',
+            border: '1px solid rgba(255,255,255,0.1)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <FileText size={18} color="#38BDF8" />
+              <span style={{ color: '#F8FAFC', fontWeight: 600, fontSize: '0.95rem' }}>
+                {previewModalDoc.filename}
+              </span>
+              <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>({previewModalDoc.mimeType})</span>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const a = document.createElement('a');
+                  a.href = previewModalDoc.url;
+                  a.download = previewModalDoc.filename;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                }}
+                className="btn btn-sm btn-primary"
+                style={{ fontSize: '0.78rem', gap: '0.35rem' }}
+              >
+                <Download size={13} /> Download
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewModalDoc(null)}
+                className="btn btn-sm btn-secondary"
+                style={{ fontSize: '0.78rem', gap: '0.35rem' }}
+              >
+                <X size={13} /> Close
+              </button>
+            </div>
+          </div>
+          <div style={{ flex: 1, background: '#FFFFFF', borderRadius: '8px', overflow: 'hidden', border: '1px solid #CBD5E1' }}>
+            {previewModalDoc.isPdf ? (
+              <iframe
+                src={previewModalDoc.url}
+                style={{ width: '100%', height: '100%', border: 'none' }}
+                title="Document Preview"
+              />
+            ) : (
+              <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+                <img
+                  src={previewModalDoc.url}
+                  alt={previewModalDoc.filename}
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}

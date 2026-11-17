@@ -60,8 +60,10 @@ export function AuthProvider({ children }) {
   };
 
   const normalizedRole = user?.role ? user.role.toLowerCase() : 'guest';
-  const isAdmin = ['admin', 'reviewer', 'officer'].includes(normalizedRole);
+  const isAdmin = normalizedRole === 'admin';
+  const isReviewer = normalizedRole === 'reviewer' || normalizedRole === 'officer';
   const isStudent = normalizedRole === 'student';
+  const isStaff = ['admin', 'reviewer', 'officer'].includes(normalizedRole);
 
   return (
     <AuthContext.Provider
@@ -69,7 +71,9 @@ export function AuthProvider({ children }) {
         user,
         role: normalizedRole,
         isAdmin,
+        isReviewer,
         isStudent,
+        isStaff,
         isAuthenticated: !!user,
         loading,
         login,

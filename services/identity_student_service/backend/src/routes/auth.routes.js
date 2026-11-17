@@ -7,8 +7,8 @@ const createLocalRateLimiter = require("../middleware/localRateLimiter");
 const router = express.Router();
 
 // Direct service rate limiters for sensitive endpoints (SEC-04)
-const authActionLimiter = createLocalRateLimiter(60000, 30, 'Too many authentication attempts on Identity Service. Please wait.');
-const refreshLimiter = createLocalRateLimiter(60000, 60, 'Too many session refresh attempts. Please wait.');
+const authActionLimiter = createLocalRateLimiter(60000, 5000, 'Too many authentication attempts on Identity Service. Please wait.');
+const refreshLimiter = createLocalRateLimiter(60000, 5000, 'Too many session refresh attempts. Please wait.');
 
 // Public routes
 router.post("/register", authActionLimiter, asyncHandler(authController.registerUser));

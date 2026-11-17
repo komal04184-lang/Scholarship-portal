@@ -27,15 +27,15 @@ if (process.env.NODE_ENV === 'production') {
 const app = express();
 
 // ─── Environment ─────────────────────────────────────────────────────────────
-const IDENTITY_SERVICE_URL    = process.env.IDENTITY_SERVICE_URL    || 'http://localhost:3001';
+const IDENTITY_SERVICE_URL = process.env.IDENTITY_SERVICE_URL || 'http://localhost:3001';
 const SCHOLARSHIP_SERVICE_URL = process.env.SCHOLARSHIP_SERVICE_URL || 'http://localhost:3002';
 const APPLICATION_SERVICE_URL = process.env.APPLICATION_SERVICE_URL || 'http://localhost:3003';
-const REVIEW_SERVICE_URL      = process.env.REVIEW_SERVICE_URL      || 'http://localhost:3004';
-const CORS_ORIGIN             = process.env.CORS_ORIGIN             || 'http://localhost:5173';
+const REVIEW_SERVICE_URL = process.env.REVIEW_SERVICE_URL || 'http://localhost:3004';
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
-const RATE_LIMIT_WINDOW_MS  = parseInt(process.env.RATE_LIMIT_WINDOW_MS  || '900000', 10);
-const RATE_LIMIT_MAX        = parseInt(process.env.RATE_LIMIT_MAX        || '100',    10);
-const AUTH_RATE_LIMIT_MAX   = parseInt(process.env.AUTH_RATE_LIMIT_MAX   || '15',     10);
+const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10);
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || (process.env.NODE_ENV === 'production' ? '100' : '20000'), 10);
+const AUTH_RATE_LIMIT_MAX = parseInt(process.env.AUTH_RATE_LIMIT_MAX || (process.env.NODE_ENV === 'production' ? '15' : '50000'), 10);
 
 // ─── Security & Parsing ──────────────────────────────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -74,9 +74,9 @@ app.use((req, res, next) => {
   generalLimiter(req, res, (err) => {
     if (err) return next(err);
     if (req.rateLimit) {
-      res.setHeader('X-RateLimit-Limit',     req.rateLimit.limit);
+      res.setHeader('X-RateLimit-Limit', req.rateLimit.limit);
       res.setHeader('X-RateLimit-Remaining', req.rateLimit.remaining);
-      res.setHeader('X-RateLimit-Reset',     Math.ceil(req.rateLimit.resetTime / 1000));
+      res.setHeader('X-RateLimit-Reset', Math.ceil(req.rateLimit.resetTime / 1000));
     }
     next();
   });
@@ -121,7 +121,7 @@ function probeService(url, timeoutMs = 2000) {
         res.on('data', (c) => { raw += c; });
         res.on('end', () => {
           let data = null;
-          try { data = JSON.parse(raw); } catch (_) {}
+          try { data = JSON.parse(raw); } catch (_) { }
           safeResolve({
             status: res.statusCode >= 200 && res.statusCode < 300 ? 'healthy' : 'degraded',
             httpStatus: res.statusCode,
@@ -132,12 +132,12 @@ function probeService(url, timeoutMs = 2000) {
 
       // Guard timer to guarantee resolution and socket termination even if DNS or connect hangs
       timer = setTimeout(() => {
-        try { req.destroy(new Error('Hard probe timeout')); } catch (_) {}
+        try { req.destroy(new Error('Hard probe timeout')); } catch (_) { }
         safeResolve({ status: 'timeout', httpStatus: 504 });
       }, timeoutMs + 200);
 
       req.on('timeout', () => {
-        try { req.destroy(); } catch (_) {}
+        try { req.destroy(); } catch (_) { }
         safeResolve({ status: 'timeout', httpStatus: 504 });
       });
 
@@ -234,7 +234,7 @@ const healthHandler = async (req, res) => {
   });
 };
 
-app.get('/health',        healthHandler);
+app.get('/health', healthHandler);
 app.get('/api/v1/health', healthHandler);
 
 // ─── Proxy Factory ───────────────────────────────────────────────────────────

@@ -10,6 +10,18 @@ class DocumentRepository {
   static async saveDocument(docData, dbClient = null) {
     const executor = dbClient ? dbClient.query.bind(dbClient) : query;
 
+    // Deactivate previous versions of document for the same requirement
+    if (docData.requirement_id && safeUuid(docData.requirement_id)) {
+      await executor(
+        `UPDATE application_documents
+         SET is_current = false
+         WHERE application_id::TEXT = $1::TEXT 
+           AND requirement_id::TEXT = $2::TEXT 
+           AND is_current = true`,
+        [String(docData.application_id), safeUuid(docData.requirement_id)]
+      );
+    }
+
     const sql = `
       INSERT INTO application_documents (
         application_id,

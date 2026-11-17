@@ -1,5 +1,5 @@
 import * as model from '../models/reviewModel.js';
-import { updateApplicationStatus } from '../clients/applicationClient.js';
+import { updateApplicationStatus, getApplicationDocuments } from '../clients/applicationClient.js';
 
 const DOC_STATUSES = new Set(['PENDING', 'VERIFIED', 'REJECTED']);
 const DECISIONS = new Set(['APPROVED', 'REJECTED', 'CORRECTION_REQUIRED']);
@@ -65,8 +65,34 @@ export async function decide(
   if (!current) return null;
   if (current.decision) throw httpError('This review already has a final decision', 409);
   if (decision === 'APPROVED') {
-    const allVerified = current.documents.length > 0 && current.documents.every(d => d.status === 'VERIFIED');
-    if (!allVerified || current.eligible !== true) throw httpError('Cannot approve: all documents must be VERIFIED and eligibility must be true', 409);
+    if (current.eligible !== true) {
+      throw httpError('Cannot approve: all documents must be VERIFIED and eligibility must be true', 409);
+    }
+
+    // Retrieve actual application documents from Application Service
+    let appDocs = [];
+    try {
+      appDocs = await getApplicationDocuments(current.applicationId, authorizationHeader);
+    } catch (_) {}
+
+    if (Array.isArray(appDocs) && appDocs.length > 0) {
+      const allAppDocsVerified = appDocs.every(d => (d.verification_status || d.status) === 'VERIFIED');
+      if (!allAppDocsVerified) {
+        throw httpError('Cannot approve: all documents must be VERIFIED and eligibility must be true', 409);
+      }
+      // Sync current.documents to match the real verified documents
+      current.documents = appDocs.map(d => ({
+        documentId: d.id,
+        name: d.original_filename || d.document_type || d.name,
+        status: d.verification_status || d.status || 'VERIFIED',
+        remarks: d.remarks || '',
+      }));
+    } else if (Array.isArray(current.documents) && current.documents.length > 0) {
+      const allVerified = current.documents.every(d => d.status === 'VERIFIED');
+      if (!allVerified) {
+        throw httpError('Cannot approve: all documents must be VERIFIED and eligibility must be true', 409);
+      }
+    }
   }
   const updated = await model.updateReview(id, { decision, decisionRemarks: remarks, reviewedBy, status: decision, callbackStatus: 'PENDING' });
   await model.addHistory(id, reviewedBy, current.status, decision, remarks || `Decision: ${decision}`);

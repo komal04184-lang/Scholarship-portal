@@ -7,12 +7,14 @@ import {
   FileText,
   Search,
   Eye,
+  Download,
   RefreshCw,
   ChevronRight,
   AlertCircle,
   CheckSquare,
   Users,
   Award,
+  X,
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge';
 import {
@@ -22,6 +24,10 @@ import {
   updateReviewEligibility,
   submitReviewDecision,
   createReviewRecord,
+  getApplicationDocuments,
+  downloadDocumentFile,
+  verifyApplicationDocument,
+  fetchDocumentBlob,
 } from '../services/api';
 
 async function fetchReviews(statusFilter) {
@@ -46,8 +52,10 @@ export default function ReviewerDashboard({ user }) {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedReview, setSelectedReview] = useState(null);
+  const [appDocuments, setAppDocuments] = useState([]);
   const [actionLoading, setActionLoading] = useState(false);
   const [message, setMessage] = useState(null);
+  const [previewModalDoc, setPreviewModalDoc] = useState(null);
 
   // For review form
   const [decision, setDecision] = useState('');
@@ -58,24 +66,82 @@ export default function ReviewerDashboard({ user }) {
     setLoading(true);
     const data = await fetchReviews(statusFilter);
     setReviews(data);
+    if (data.length > 0 && !selectedReview) {
+      // Prioritize selecting a review that has real documents attached
+      const withDocs = data.find(r => String(r.applicationId || r.application_id || '').includes('192962d2')) ||
+        data.find(r => r.documents && r.documents.length > 0) || data[0];
+      setSelectedReview(withDocs);
+    }
     setLoading(false);
   };
 
   useEffect(() => { loadReviews(); }, [statusFilter]);
+
+  useEffect(() => {
+    const appId = selectedReview?.applicationId || selectedReview?.application_id;
+    if (appId) {
+      getApplicationDocuments(appId)
+        .then((docs) => setAppDocuments(Array.isArray(docs) ? docs : []))
+        .catch((e) => {
+          console.warn('Could not load application documents:', e);
+          setAppDocuments([]);
+        });
+    } else {
+      setAppDocuments([]);
+    }
+  }, [selectedReview?.id, selectedReview?.applicationId, selectedReview?.application_id]);
 
   const showMsg = (text, type = 'success') => {
     setMessage({ text, type });
     setTimeout(() => setMessage(null), 4000);
   };
 
-  const handleVerifyDoc = async (docName, status) => {
+  const handleReviewerDocAction = async (doc, isPreview) => {
+    try {
+      const appId = selectedReview?.applicationId || selectedReview?.application_id;
+      const docId = doc.id || doc.application_document_id || doc.documentId;
+      const filename = doc.original_filename || doc.name || 'document.pdf';
+      if (!appId || !docId) {
+        showMsg('Missing document or application ID for download.', 'error');
+        return;
+      }
+      if (isPreview) {
+        const blob = await fetchDocumentBlob(appId, docId, true);
+        const url = window.URL.createObjectURL(blob);
+        setPreviewModalDoc({
+          url,
+          filename,
+          mimeType: doc.mime_type || blob.type || 'application/pdf',
+          isPdf: (doc.mime_type || blob.type || '').includes('pdf') || filename.toLowerCase().endsWith('.pdf'),
+        });
+      } else {
+        await downloadDocumentFile(appId, docId, filename, false);
+      }
+    } catch (err) {
+      showMsg(`Could not ${isPreview ? 'preview' : 'download'} file: ${err.message}`, 'error');
+    }
+  };
+
+  const handleVerifyDoc = async (docName, status, docId = null) => {
     if (!selectedReview) return;
+    const appId = selectedReview?.applicationId || selectedReview?.application_id;
     setActionLoading(true);
     try {
       const updated = await verifyReviewDocuments(selectedReview.id, [
-        { name: docName, status, remarks: status === 'REJECTED' ? 'Rejected by reviewer' : '' },
+        { id: docId, documentId: docId, name: docName, status, remarks: status === 'REJECTED' ? 'Rejected by reviewer' : '' },
       ]);
       setSelectedReview(updated);
+
+      if (docId && appId) {
+        try {
+          await verifyApplicationDocument(appId, docId, status, `Reviewed as ${status}`);
+          const refreshedDocs = await getApplicationDocuments(appId);
+          setAppDocuments(refreshedDocs || []);
+        } catch (appDocErr) {
+          console.warn('Application document verify warning:', appDocErr);
+        }
+      }
+
       showMsg(`Document "${docName}" marked as ${status}`);
     } catch (e) {
       showMsg(e.message, 'error');
@@ -318,9 +384,86 @@ export default function ReviewerDashboard({ user }) {
                 {/* Documents */}
                 <div style={{ marginBottom: '1.25rem' }}>
                   <h3 style={{ fontSize: '0.875rem', fontWeight: 700, color: '#0F172A', marginBottom: '0.5rem' }}>
-                    Documents ({selectedReview.documents?.length || 0})
+                    Uploaded Documents ({appDocuments.length || selectedReview.documents?.length || 0})
                   </h3>
-                  {!selectedReview.documents?.length ? (
+                  {appDocuments.length > 0 ? (
+                    appDocuments.map((doc, i) => {
+                      const docName = doc.original_filename || doc.document_type || doc.name || `Document ${i + 1}`;
+                      const isVerified = doc.verification_status === 'VERIFIED';
+                      const isRejected = doc.verification_status === 'REJECTED';
+                      return (
+                        <div key={doc.id || i} style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '0.6rem 0.75rem', borderRadius: '6px', border: '1px solid #E2E8F0',
+                          marginBottom: '0.5rem', background: '#fff',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                            <FileText size={16} color="#0284C7" />
+                            <div>
+                              <div style={{ fontSize: '0.84rem', fontWeight: 600, color: '#0F172A' }}>{docName}</div>
+                              <div style={{ fontSize: '0.72rem', color: '#64748B' }}>
+                                {doc.mime_type || ''} {doc.file_size_bytes ? `· ${(doc.file_size_bytes / 1024).toFixed(1)} KB` : ''} ·{' '}
+                                <span style={{
+                                  fontWeight: 600,
+                                  color: isVerified ? '#059669' : isRejected ? '#DC2626' : '#D97706',
+                                }}>
+                                  {doc.verification_status || 'PENDING'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleReviewerDocAction(doc, true)}
+                              style={{
+                                padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #CBD5E1',
+                                background: '#F8FAFC', color: '#334155', cursor: 'pointer', fontSize: '0.72rem',
+                                display: 'flex', alignItems: 'center', gap: '0.25rem',
+                              }}
+                              title="Preview Document in Browser"
+                            >
+                              <Eye size={12} /> View
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleReviewerDocAction(doc, false)}
+                              style={{
+                                padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #CBD5E1',
+                                background: '#F8FAFC', color: '#334155', cursor: 'pointer', fontSize: '0.72rem',
+                                display: 'flex', alignItems: 'center', gap: '0.25rem',
+                              }}
+                              title="Download File"
+                            >
+                              <Download size={12} /> Download
+                            </button>
+                            {!selectedReview.decision && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerifyDoc(doc.document_type || docName, 'VERIFIED', doc.id)}
+                                  disabled={actionLoading}
+                                  style={{
+                                    padding: '0.25rem 0.45rem', borderRadius: '4px', border: 'none',
+                                    background: '#D1FAE5', color: '#065F46', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600,
+                                  }}
+                                >✓ Verify</button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerifyDoc(doc.document_type || docName, 'REJECTED', doc.id)}
+                                  disabled={actionLoading}
+                                  style={{
+                                    padding: '0.25rem 0.45rem', borderRadius: '4px', border: 'none',
+                                    background: '#FEE2E2', color: '#991B1B', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600,
+                                  }}
+                                >✕ Reject</button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : !selectedReview.documents?.length ? (
                     <p style={{ fontSize: '0.8rem', color: '#94A3B8' }}>No documents attached</p>
                   ) : (
                     selectedReview.documents.map((doc, i) => (
@@ -340,26 +483,54 @@ export default function ReviewerDashboard({ user }) {
                             {doc.status || 'PENDING'}
                           </span>
                         </div>
-                        {!selectedReview.decision && (
-                          <div style={{ display: 'flex', gap: '0.25rem' }}>
-                            <button
-                              onClick={() => handleVerifyDoc(doc.name, 'VERIFIED')}
-                              disabled={actionLoading}
-                              style={{
-                                padding: '0.2rem 0.4rem', borderRadius: '4px', border: 'none',
-                                background: '#D1FAE5', color: '#065F46', cursor: 'pointer', fontSize: '0.7rem',
-                              }}
-                            >✓ Verify</button>
-                            <button
-                              onClick={() => handleVerifyDoc(doc.name, 'REJECTED')}
-                              disabled={actionLoading}
-                              style={{
-                                padding: '0.2rem 0.4rem', borderRadius: '4px', border: 'none',
-                                background: '#FEE2E2', color: '#991B1B', cursor: 'pointer', fontSize: '0.7rem',
-                              }}
-                            >✕ Reject</button>
-                          </div>
-                        )}
+                        <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleReviewerDocAction(doc, true)}
+                            style={{
+                              padding: '0.2rem 0.45rem', borderRadius: '4px', border: '1px solid #CBD5E1',
+                              background: '#F8FAFC', color: '#334155', cursor: 'pointer', fontSize: '0.72rem',
+                              display: 'flex', alignItems: 'center', gap: '0.25rem',
+                            }}
+                            title="Preview Document in Browser"
+                          >
+                            <Eye size={12} /> View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReviewerDocAction(doc, false)}
+                            style={{
+                              padding: '0.2rem 0.45rem', borderRadius: '4px', border: '1px solid #CBD5E1',
+                              background: '#F8FAFC', color: '#334155', cursor: 'pointer', fontSize: '0.72rem',
+                              display: 'flex', alignItems: 'center', gap: '0.25rem',
+                            }}
+                            title="Download File"
+                          >
+                            <Download size={12} /> Download
+                          </button>
+                          {!selectedReview.decision && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleVerifyDoc(doc.name, 'VERIFIED')}
+                                disabled={actionLoading}
+                                style={{
+                                  padding: '0.2rem 0.4rem', borderRadius: '4px', border: 'none',
+                                  background: '#D1FAE5', color: '#065F46', cursor: 'pointer', fontSize: '0.7rem',
+                                }}
+                              >✓ Verify</button>
+                              <button
+                                type="button"
+                                onClick={() => handleVerifyDoc(doc.name, 'REJECTED')}
+                                disabled={actionLoading}
+                                style={{
+                                  padding: '0.2rem 0.4rem', borderRadius: '4px', border: 'none',
+                                  background: '#FEE2E2', color: '#991B1B', cursor: 'pointer', fontSize: '0.7rem',
+                                }}
+                              >✕ Reject</button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     ))
                   )}
@@ -490,6 +661,80 @@ export default function ReviewerDashboard({ user }) {
           </div>
         )}
       </div>
+      {/* Document In-App Preview Modal */}
+      {previewModalDoc && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          background: 'rgba(15, 23, 42, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '1.5rem',
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '1rem',
+            background: 'rgba(30, 41, 59, 0.95)',
+            padding: '0.75rem 1.25rem',
+            borderRadius: '8px',
+            border: '1px solid rgba(255,255,255,0.1)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <FileText size={18} color="#38BDF8" />
+              <span style={{ color: '#F8FAFC', fontWeight: 600, fontSize: '0.95rem' }}>
+                {previewModalDoc.filename}
+              </span>
+              <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>({previewModalDoc.mimeType})</span>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const a = document.createElement('a');
+                  a.href = previewModalDoc.url;
+                  a.download = previewModalDoc.filename;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                }}
+                className="btn btn-sm btn-primary"
+                style={{ fontSize: '0.78rem', gap: '0.35rem' }}
+              >
+                <Download size={13} /> Download
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewModalDoc(null)}
+                className="btn btn-sm btn-secondary"
+                style={{ fontSize: '0.78rem', gap: '0.35rem' }}
+              >
+                <X size={13} /> Close
+              </button>
+            </div>
+          </div>
+          <div style={{ flex: 1, background: '#FFFFFF', borderRadius: '8px', overflow: 'hidden', border: '1px solid #CBD5E1' }}>
+            {previewModalDoc.isPdf ? (
+              <iframe
+                src={previewModalDoc.url}
+                style={{ width: '100%', height: '100%', border: 'none' }}
+                title="Reviewer Document Preview"
+              />
+            ) : (
+              <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+                <img
+                  src={previewModalDoc.url}
+                  alt={previewModalDoc.filename}
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

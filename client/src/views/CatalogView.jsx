@@ -16,7 +16,7 @@ import {
 import ScholarshipCard from '../components/ScholarshipCard';
 import ScholarshipDetailModal from '../components/ScholarshipDetailModal';
 import ApplyModal from '../components/ApplyModal';
-import { getScholarships } from '../services/api';
+import { getScholarships, getStudentApplications } from '../services/api';
 
 const DISCIPLINES = [
   'Engineering & Technology',
@@ -76,10 +76,35 @@ export default function CatalogView({ user, onRequireAuth, onNavigateDashboard }
   // Modals
   const [selectedScholarship, setSelectedScholarship] = useState(null);
   const [applyingScholarship, setApplyingScholarship] = useState(null);
+  const [appliedMap, setAppliedMap] = useState({});
 
   useEffect(() => {
     loadScholarships();
   }, [selectedCategory, minGpaFilter, maxIncomeFilter]);
+
+  useEffect(() => {
+    loadApplications();
+  }, [user]);
+
+  const loadApplications = async () => {
+    if (!user) {
+      setAppliedMap({});
+      return;
+    }
+    try {
+      const apps = await getStudentApplications();
+      const map = {};
+      (apps || []).forEach((a) => {
+        const sId = a.scholarship_id || a.scholarship?.scholarship_id || a.scholarship?.id;
+        if (sId) {
+          map[String(sId)] = a.status || 'SUBMITTED';
+        }
+      });
+      setAppliedMap(map);
+    } catch (e) {
+      console.warn('Failed to load student applications for catalog:', e.message);
+    }
+  };
 
   const loadScholarships = async () => {
     setLoading(true);
@@ -102,6 +127,10 @@ export default function CatalogView({ user, onRequireAuth, onNavigateDashboard }
     if (!user) {
       onRequireAuth();
       return;
+    }
+    const sId = String(scholarship.scholarship_id || scholarship.id || '');
+    if (appliedMap[sId]) {
+      return; // Already applied
     }
     setApplyingScholarship(scholarship);
   };
@@ -661,6 +690,7 @@ export default function CatalogView({ user, onRequireAuth, onNavigateDashboard }
                     key={sch.scholarship_id}
                     scholarship={sch}
                     userProfile={user}
+                    appliedStatus={appliedMap[String(sch.scholarship_id || sch.id)]}
                     onSelect={(s) => setSelectedScholarship(s)}
                     onApply={(s) => handleApplyClick(s)}
                   />
@@ -675,6 +705,7 @@ export default function CatalogView({ user, onRequireAuth, onNavigateDashboard }
       {selectedScholarship && (
         <ScholarshipDetailModal
           scholarship={selectedScholarship}
+          appliedStatus={appliedMap[String(selectedScholarship.scholarship_id || selectedScholarship.id)]}
           onClose={() => setSelectedScholarship(null)}
           onApply={(s) => {
             setSelectedScholarship(null);
@@ -690,6 +721,7 @@ export default function CatalogView({ user, onRequireAuth, onNavigateDashboard }
           onClose={() => setApplyingScholarship(null)}
           onSuccess={() => {
             setApplyingScholarship(null);
+            loadApplications();
             if (onNavigateDashboard) onNavigateDashboard();
           }}
         />

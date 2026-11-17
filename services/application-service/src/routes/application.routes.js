@@ -121,6 +121,13 @@ router.patch(
   ApplicationController.updateApplication
 );
 
+router.put(
+  '/:id',
+  authorize('student'),
+  validateRequest(updateApplicationSchema, 'body'),
+  ApplicationController.updateApplication
+);
+
 // Student withdraws application
 router.post(
   '/:id/withdraw',

@@ -75,9 +75,27 @@ async function getProfileById(req, res) {
   const profile = await ProfileRepository.findById(targetId);
 
   if (!profile) {
-    return res.status(404).json({
-      status: "error",
-      message: "Profile not found",
+    const user = await UserRepository.findById(targetId);
+    if (!user) {
+      return res.status(404).json({
+        status: "error",
+        message: "Profile not found",
+      });
+    }
+
+    return res.status(200).json({
+      status: "success",
+      profile: {
+        id: user.id,
+        _id: user.id,
+        user_id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        profile_complete: false,
+        academic_details: {},
+      },
     });
   }
 
