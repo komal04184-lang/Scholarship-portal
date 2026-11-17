@@ -284,10 +284,18 @@ async function request(endpoint, options = {}) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    const message =
-      data.error || data.message || `Request failed (${res.status})`;
-
-    throw new Error(message);
+    let message = data.error || data.message || `Request failed (${res.status})`;
+    if (Array.isArray(data.errors) && data.errors.length > 0) {
+      message = data.errors.join(', ');
+    } else if (typeof data.error === 'object' && data.error !== null) {
+      message = data.error.message || message;
+    }
+    const err = new Error(message);
+    err.status = res.status;
+    err.data = data;
+    err.errors = data.errors || [];
+    err.code = data.code || data.error?.code || null;
+    throw err;
   }
 
   return data;
@@ -300,13 +308,14 @@ async function request(endpoint, options = {}) {
 export async function getScholarships(filters = {}) {
   const params = new URLSearchParams();
   if (filters.search) params.append('search', filters.search);
-  if (filters.status) params.append('status', filters.status);
+  if (filters.status && filters.status !== 'ALL') params.append('status', filters.status);
   if (filters.category && filters.category !== 'All') params.append('category', filters.category);
   if (filters.sortBy) params.append('sort_by', filters.sortBy);
   params.append('limit', '50');
+  params.append('_t', Date.now().toString());
 
   const query = params.toString() ? `?${params.toString()}` : '';
-  const res = await request(`/scholarships${query}`);
+  const res = await request(`/scholarships${query}`, { cache: 'no-store' });
   const rawList = res.items || res.scholarships || res.data || (Array.isArray(res) ? res : []);
   return rawList.map(normalizeScholarship);
 }
@@ -424,28 +433,47 @@ export async function getCurrentUser() {
 export async function getStudentProfile() {
   // Backend: GET /api/v1/profile/me
   const res = await request('/profile/me');
-  const u = res.user || {};
+  const u = res.user || res.profile || res.data || {};
   const a = u.academic_details || {};
-  const uid = String(u._id || u.id || '');
+  const uid = String(u.user_id || u.id || u._id || '');
 
   return {
+    ...u,
+    id: uid,
+    user_id: uid,
     student_id: uid,
     name: u.username || 'Student',
+    username: u.username || '',
     email: u.email || '',
     phone: u.phone || '',
     address: u.address || '',
     state: u.state || '',
     city: u.city || '',
-    gender: u.gender || 'Not Specified',
-    date_of_birth: u.date_of_birth,
+    gender: u.gender || '',
+    date_of_birth: u.date_of_birth || u.dob || null,
+    dob: u.dob || u.date_of_birth || null,
+    enrollment_no: u.enrollment_no || '',
+    family_income: u.family_income !== null && u.family_income !== undefined ? Number(u.family_income) : null,
+    category: u.category || '',
+    profile_complete: !!u.profile_complete,
+    academic_details: {
+      institution_name: a.institution_name || '',
+      course: a.course || '',
+      branch: a.branch || '',
+      academic_year: a.academic_year || '',
+      semester: a.semester !== null && a.semester !== undefined ? Number(a.semester) : null,
+      cgpa: a.cgpa !== null && a.cgpa !== undefined ? Number(a.cgpa) : null,
+      marks_percentage: a.marks_percentage !== null && a.marks_percentage !== undefined ? Number(a.marks_percentage) : null,
+      passing_year: a.passing_year !== null && a.passing_year !== undefined ? Number(a.passing_year) : null,
+    },
     academics: {
-      student_uid: uid ? `STU-${uid.slice(-6).toUpperCase()}` : '',
+      student_uid: u.enrollment_no || (uid ? `STU-${uid.slice(-6).toUpperCase()}` : ''),
       department: a.branch || a.course || '',
       major: a.branch || a.course || '',
       degree_level: a.course || '',
       current_year: a.semester ? Math.ceil(a.semester / 2) : null,
-      cgpa: a.cgpa ?? null,
-      family_annual_income: u.family_income ?? null,
+      cgpa: a.cgpa !== null && a.cgpa !== undefined ? Number(a.cgpa) : null,
+      family_annual_income: u.family_income !== null && u.family_income !== undefined ? Number(u.family_income) : null,
       category: u.category || 'General',
     },
   };
@@ -601,16 +629,35 @@ export async function createDraftApplication(appData) {
 }
 
 /**
- * Submit a previously saved draft application
+ * Update an existing draft application
  */
-export async function submitDraftApplication(applicationId) {
+export async function updateDraftApplication(applicationId, updateData) {
   try {
-    const res = await request(`/applications/${applicationId}/submit`, {
-      method: 'POST',
+    const res = await request(`/applications/${applicationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        statement: updateData.sop || updateData.statement || '',
+        sop: updateData.sop || updateData.statement || '',
+        academic_year: updateData.academic_year || '2026-2027',
+        metadata: updateData.metadata,
+      }),
     });
-    return res;
+    return res.data?.application || res.application || res;
   } catch (err) {
-    console.warn('submitDraftApplication error:', err.message);
+    console.warn('updateDraftApplication error:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Get detailed application by ID
+ */
+export async function getApplicationById(applicationId) {
+  try {
+    const res = await request(`/applications/${applicationId}`);
+    return res.data || res;
+  } catch (err) {
+    console.warn('getApplicationById error:', err.message);
     throw err;
   }
 }
@@ -658,13 +705,29 @@ export async function getApplicationDocuments(applicationId) {
 }
 
 /**
- * Upload a document to an application
+ * Get document requirements snapshot for an application
  */
-export async function uploadApplicationDocument(applicationId, file, documentType = '') {
+export async function getApplicationRequirements(applicationId) {
+  try {
+    const res = await request(`/applications/${applicationId}/requirements`);
+    return res.data?.requirements || res.requirements || [];
+  } catch (err) {
+    console.warn('getApplicationRequirements error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Upload a document to an application (supports requirementId association)
+ */
+export async function uploadApplicationDocument(applicationId, file, documentType = '', requirementId = null) {
   try {
     const fd = new FormData();
     fd.append('document', file);
     fd.append('document_type', documentType || file.name.split('.')[0] || 'Document');
+    if (requirementId) {
+      fd.append('requirement_id', requirementId);
+    }
     const res = await request(`/applications/${applicationId}/documents`, {
       method: 'POST',
       body: fd,
@@ -672,6 +735,109 @@ export async function uploadApplicationDocument(applicationId, file, documentTyp
     return res.data?.document || res.document || null;
   } catch (err) {
     console.warn('uploadApplicationDocument error:', err.message);
+    throw err;
+  }
+}
+
+export async function fetchDocumentBlob(applicationId, documentId, isPreview = false) {
+  const token = getStoredToken();
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const url = `${API_BASE}/applications/${applicationId}/documents/${documentId}/download${isPreview ? '?inline=true' : ''}`;
+  const res = await fetch(url, {
+    method: 'GET',
+    credentials: 'include',
+    headers,
+  });
+  if (!res.ok) {
+    let errMsg = `Failed to fetch document (${res.status})`;
+    try {
+      const errJson = await res.json();
+      errMsg = errJson.message || errJson.error?.message || errMsg;
+    } catch (_) {}
+    throw new Error(errMsg);
+  }
+  return await res.blob();
+}
+
+/**
+ * View/Preview or Download an application document securely
+ */
+export async function downloadDocumentFile(applicationId, documentId, filename = 'document.pdf', isPreview = false) {
+  const token = getStoredToken();
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const url = `${API_BASE}/applications/${applicationId}/documents/${documentId}/download${isPreview ? '?inline=true' : ''}`;
+  const res = await fetch(url, {
+    method: 'GET',
+    credentials: 'include',
+    headers,
+  });
+
+  if (!res.ok) {
+    let errMsg = `Failed to ${isPreview ? 'preview' : 'download'} document (${res.status})`;
+    try {
+      const errJson = await res.json();
+      errMsg = errJson.message || errJson.error?.message || errMsg;
+    } catch (_) {}
+    throw new Error(errMsg);
+  }
+
+  const blob = await res.blob();
+  const blobUrl = window.URL.createObjectURL(blob);
+
+  if (isPreview) {
+    const previewWin = window.open(blobUrl, '_blank', 'noopener,noreferrer');
+    if (!previewWin) {
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 120000);
+  } else {
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename || 'document';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 20000);
+  }
+}
+
+/**
+ * Submit an existing draft application
+ */
+export async function submitDraftApplication(applicationId) {
+  try {
+    const res = await request(`/applications/${applicationId}/submit`, {
+      method: 'POST',
+    });
+    return res.data?.application || res.application || res;
+  } catch (err) {
+    console.warn('submitDraftApplication error:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Verify an uploaded document (Reviewer/Admin)
+ */
+export async function verifyApplicationDocument(applicationId, documentId, status, comment = '') {
+  try {
+    const res = await request(`/applications/${applicationId}/documents/${documentId}/verify`, {
+      method: 'PATCH',
+      body: JSON.stringify({ verification_status: status, reviewer_comment: comment }),
+    });
+    return res.data?.document || res.document || res;
+  } catch (err) {
+    console.warn('verifyApplicationDocument error:', err.message);
     throw err;
   }
 }
@@ -748,31 +914,59 @@ export async function getAdminMetrics() {
   }
 }
 
+export async function getStudentProfileById(studentId) {
+  try {
+    const res = await request(`/profile/${studentId}`);
+    return res.profile || res.user || res.data || null;
+  } catch (err) {
+    console.warn(`getStudentProfileById error for student ${studentId}:`, err.message);
+    return null;
+  }
+}
+
 export async function getAdminApplications(statusFilter = 'ALL') {
   try {
     const query = statusFilter !== 'ALL' ? `?status=${statusFilter}&limit=50` : '?limit=50';
     const res = await request(`/applications/admin/all${query}`);
     const rawApps = res.data?.applications || res.applications || [];
 
-    return rawApps.map((a) => ({
-      id: String(a.application_id || a.id),
-      raw_id: a.application_id || a.id,
-      application_number: a.application_number || `APP-2026-00${a.application_id || a.id}`,
-      applicant_name: a.student_name || (a.student_id ? `Student #${a.student_id}` : 'Applicant'),
-      email: a.student_email || '',
-      student_uid: a.student_id ? `STU-2025-0${a.student_id}` : 'STU-2025-01',
-      student_id: a.student_id,
-      scholarship_id: a.scholarship_id,
-      cgpa: a.cgpa || 8.5,
-      income: a.annual_income || 350000,
-      scholarship_title: a.scholarship_name || a.scholarship_title || 'Scholarship Scheme',
-      category: a.category || 'Merit',
-      amount: parseFloat(a.scholarship_amount || a.amount) || 50000,
-      status: a.status || 'SUBMITTED',
-      submitted_date: a.submitted_at ? new Date(a.submitted_at).toLocaleDateString() : 'Recent',
-      documents_count: parseInt(a.document_count || a.doc_count || 3, 10),
-      remarks: a.reviewer_name ? `Reviewed by ${a.reviewer_name}` : (a.remarks || 'Awaiting reviewer remarks'),
-    }));
+    return rawApps.map((a) => {
+      const prof = a.student_profile || {};
+      const acad = prof.academic_details || a.academic_details || {};
+      const studentId = a.student_id ? String(a.student_id) : '';
+      const rollNo = prof.enrollment_no || a.enrollment_no || (studentId ? `STU-${studentId.slice(-6).toUpperCase()}` : null);
+
+      const realCgpa = (a.cgpa !== undefined && a.cgpa !== null) ? Number(a.cgpa) : ((acad.cgpa !== undefined && acad.cgpa !== null) ? Number(acad.cgpa) : null);
+      const realIncome = (a.family_income !== undefined && a.family_income !== null) ? Number(a.family_income) : ((prof.family_income !== undefined && prof.family_income !== null) ? Number(prof.family_income) : null);
+
+      return {
+        id: String(a.application_id || a.id),
+        raw_id: a.application_id || a.id,
+        application_number: a.application_number || `APP-2026-00${a.application_id || a.id}`,
+        applicant_name: a.student_name || prof.username || (studentId ? `Student #${studentId.slice(0, 8)}` : 'Applicant'),
+        email: a.student_email || prof.email || '',
+        student_uid: rollNo || 'Not Provided',
+        enrollment_no: rollNo,
+        student_id: a.student_id,
+        scholarship_id: a.scholarship_id,
+        cgpa: realCgpa,
+        income: realIncome,
+        university: a.institution_name || acad.institution_name || prof.institution_name || null,
+        department: a.department || acad.branch || acad.course || null,
+        course: a.course || acad.course || null,
+        degree_level: a.degree_level || acad.course || null,
+        semester: (a.semester !== undefined && a.semester !== null) ? a.semester : ((acad.semester !== undefined && acad.semester !== null) ? acad.semester : null),
+        academic_year: a.academic_year || acad.academic_year || null,
+        student_profile: prof,
+        scholarship_title: a.scholarship_name || a.scholarship_title || 'Scholarship Scheme',
+        category: a.category || 'Merit',
+        amount: parseFloat(a.scholarship_amount || a.amount) || 50000,
+        status: a.status || 'SUBMITTED',
+        submitted_date: a.submitted_at ? new Date(a.submitted_at).toLocaleDateString() : 'Recent',
+        documents_count: parseInt(a.document_count || a.doc_count || 0, 10),
+        remarks: a.reviewer_name ? `Reviewed by ${a.reviewer_name}` : (a.remarks || 'Awaiting reviewer remarks'),
+      };
+    });
   } catch (err) {
     console.warn('getAdminApplications error:', err.message);
     throw err;
@@ -921,6 +1115,31 @@ export async function createScholarship(scholarshipData) {
   });
 
   return res;
+}
+
+export async function updateScholarshipStatus(scholarshipId, status, remarks = '') {
+  return await request(`/scholarships/${scholarshipId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, remarks }),
+  });
+}
+
+export async function pauseScholarship(scholarshipId) {
+  return await updateScholarshipStatus(scholarshipId, 'paused', 'Paused by Administrator');
+}
+
+export async function resumeScholarship(scholarshipId) {
+  return await updateScholarshipStatus(scholarshipId, 'published', 'Resumed by Administrator');
+}
+
+export async function archiveScholarship(scholarshipId) {
+  return await updateScholarshipStatus(scholarshipId, 'archived', 'Archived by Administrator');
+}
+
+export async function deleteScholarship(scholarshipId) {
+  return await request(`/scholarships/${scholarshipId}`, {
+    method: 'DELETE',
+  });
 }
 
 export async function checkSystemHealth() {

@@ -27,15 +27,12 @@ class ReviewClient {
           scholarshipId: String(payload.scholarshipId),
           documents: Array.isArray(payload.documents) && payload.documents.length > 0
             ? payload.documents.map((d) => ({
-                name: d.document_type || d.name || 'Document',
-                status: 'PENDING',
-                remarks: '',
+                documentId: d.documentId || d.id || null,
+                name: d.document_type || d.original_filename || d.name || 'Document',
+                status: d.status || d.verification_status || 'PENDING',
+                remarks: d.remarks || '',
               }))
-            : [
-                { name: 'Identity Proof', status: 'PENDING', remarks: '' },
-                { name: 'Academic Marksheet', status: 'PENDING', remarks: '' },
-                { name: 'Income Certificate', status: 'PENDING', remarks: '' },
-              ],
+            : [],
         };
 
         const postData = JSON.stringify(reviewData);

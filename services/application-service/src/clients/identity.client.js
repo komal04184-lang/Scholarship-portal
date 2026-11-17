@@ -84,6 +84,74 @@ class IdentityClient {
       }
     });
   }
+
+  /**
+   * Fetches a student profile by their user ID / student ID from Identity Service
+   * @param {string} studentId - Student UUID
+   * @param {string} [authorizationHeader] - Bearer token or cookie for auth
+   * @returns {Promise<object|null>} Student profile or null
+   */
+  static async getStudentProfileById(studentId, authorizationHeader = null) {
+    if (!studentId) return null;
+    const baseUrl = env.services.identityServiceUrl;
+
+    return new Promise((resolve) => {
+      try {
+        const urlObj = new URL(`/api/v1/profile/${studentId}`, baseUrl);
+        const protocol = urlObj.protocol === 'https:' ? https : http;
+
+        const headers = {
+          'Accept': 'application/json',
+        };
+        if (authorizationHeader) {
+          headers['Authorization'] = authorizationHeader;
+        }
+
+        const req = protocol.request(
+          urlObj,
+          {
+            method: 'GET',
+            headers,
+            timeout: 3000,
+          },
+          (res) => {
+            let data = '';
+            res.on('data', (chunk) => {
+              data += chunk;
+            });
+            res.on('end', () => {
+              try {
+                if (res.statusCode === 200) {
+                  const json = JSON.parse(data);
+                  return resolve(json.profile || json.user || json.data || null);
+                }
+                logger.warn(`Identity Service getProfileById status ${res.statusCode} for ${studentId}`);
+                resolve(null);
+              } catch (e) {
+                resolve(null);
+              }
+            });
+          }
+        );
+
+        req.on('timeout', () => {
+          req.destroy();
+          logger.warn(`Identity Service getProfileById timed out for ${studentId}`);
+          resolve(null);
+        });
+
+        req.on('error', (err) => {
+          logger.warn(`Identity Service getProfileById error: ${err.message}`);
+          resolve(null);
+        });
+
+        req.end();
+      } catch (err) {
+        logger.warn(`Identity Service request failed: ${err.message}`);
+        resolve(null);
+      }
+    });
+  }
 }
 
 module.exports = IdentityClient;

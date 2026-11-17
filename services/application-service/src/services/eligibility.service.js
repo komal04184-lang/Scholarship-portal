@@ -13,23 +13,35 @@ class EligibilityService {
 
     // 1. Verify scholarship active status
     const status = String(scholarship.status || '').toUpperCase();
+    if (status === 'PAUSED') {
+      const err = new Error(`Scholarship '${scholarship.name || scholarship.title || scholarshipId}' is currently paused and not accepting new applications.`);
+      err.statusCode = 400;
+      err.errorCode = 'SCHOLARSHIP_PAUSED';
+      err.code = 'SCHOLARSHIP_PAUSED';
+      throw err;
+    }
     const activeStatuses = ['ACTIVE', 'OPEN', 'PUBLISHED'];
     if (status && !activeStatuses.includes(status)) {
-      const err = new Error(`Scholarship '${scholarship.name || scholarship.title || scholarshipId}' is currently inactive (${scholarship.status}).`);
+      const err = new Error(`Scholarship '${scholarship.name || scholarship.title || scholarshipId}' is currently unavailable (${scholarship.status}).`);
       err.statusCode = 400;
       err.errorCode = 'SCHOLARSHIP_INACTIVE';
+      err.code = 'SCHOLARSHIP_INACTIVE';
       throw err;
     }
 
-    // 2. Verify application deadline
+    // 2. Verify application deadline (Consistent boundary policy: YYYY-MM-DD closes at 23:59:59.999)
     const deadlineStr = scholarship.deadline || scholarship.application_end_date;
     if (deadlineStr) {
       const deadlineDate = new Date(deadlineStr);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(deadlineStr).trim())) {
+        deadlineDate.setHours(23, 59, 59, 999);
+      }
       const now = new Date();
-      if (!isNaN(deadlineDate.getTime()) && deadlineDate < now) {
-        const err = new Error(`The application deadline for '${scholarship.name || scholarship.title || scholarshipId}' has passed (${deadlineStr}).`);
+      if (!isNaN(deadlineDate.getTime()) && deadlineDate.getTime() < now.getTime()) {
+        const err = new Error(`The application deadline for '${scholarship.name || scholarship.title || scholarshipId}' has passed (${deadlineStr}). Applications are now closed.`);
         err.statusCode = 400;
-        err.errorCode = 'SCHOLARSHIP_DEADLINE_EXPIRED';
+        err.errorCode = 'APPLICATION_DEADLINE_PASSED';
+        err.code = 'APPLICATION_DEADLINE_PASSED';
         throw err;
       }
     }

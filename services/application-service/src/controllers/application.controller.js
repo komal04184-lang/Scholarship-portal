@@ -73,7 +73,20 @@ class ApplicationController {
   static async getRequirements(req, res, next) {
     try {
       await ApplicationService.getApplicationById(req.params.id, req.user);
-      const requirements = await RequirementRepository.getByApplicationId(req.params.id);
+      const rawReqs = await RequirementRepository.getByApplicationId(req.params.id);
+      // Normalize: expose id as both 'id' and 'requirement_id' for frontend/client compatibility
+      const requirements = rawReqs.map((r) => ({
+        requirement_id: r.id,
+        id: r.id,
+        application_id: r.application_id,
+        requirement_code: r.requirement_code,
+        requirement_name: r.requirement_name,
+        description: r.description,
+        is_mandatory: r.is_mandatory,
+        allowed_mime_types: r.allowed_mime_types,
+        max_file_size_bytes: r.max_file_size_bytes,
+        created_at: r.created_at,
+      }));
       return ApiResponse.success(res, 'Document requirements retrieved successfully', { requirements });
     } catch (err) {
       next(err);
@@ -114,7 +127,8 @@ class ApplicationController {
    */
   static async getApplicationById(req, res, next) {
     try {
-      const result = await ApplicationService.getApplicationById(req.params.id, req.user);
+      const authHeader = req.headers.authorization;
+      const result = await ApplicationService.getApplicationById(req.params.id, req.user, authHeader);
       return ApiResponse.success(res, 'Application details retrieved successfully', result);
     } catch (err) {
       next(err);
@@ -196,10 +210,12 @@ class ApplicationController {
     try {
       const { status, scholarship_id, page = 1, limit = 20, sort = 'DESC' } = req.query;
       const offset = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+      const authHeader = req.headers.authorization;
 
       const result = await ApplicationService.getAllApplications(
         { status, scholarship_id },
-        { limit: parseInt(limit, 10), offset, sort }
+        { limit: parseInt(limit, 10), offset, sort },
+        authHeader
       );
 
       return ApiResponse.success(res, 'Applications retrieved successfully', {

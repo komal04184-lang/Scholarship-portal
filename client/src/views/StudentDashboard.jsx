@@ -16,16 +16,20 @@ import {
   Briefcase,
   RefreshCw,
   Download,
+  Eye,
   X,
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge';
+import ApplyModal from '../components/ApplyModal';
 import {
   getStudentApplications,
   getStudentProfile,
   updateStudentProfile,
   getApplicationTracking,
   getApplicationDocuments,
+  downloadDocumentFile,
   withdrawApplication,
+  getScholarshipById,
 } from '../services/api';
 
 export default function StudentDashboard({ onBrowseScholarships }) {
@@ -37,6 +41,11 @@ export default function StudentDashboard({ onBrowseScholarships }) {
   const [documents, setDocuments] = useState([]);
   const [trackingLoading, setTrackingLoading] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
+
+  // Resume Draft Modal State
+  const [resumingDraft, setResumingDraft] = useState(null);
+  const [resumingScholarship, setResumingScholarship] = useState(null);
+  const [resumeLoading, setResumeLoading] = useState(false);
 
   // Profile Edit modal
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -114,6 +123,50 @@ export default function StudentDashboard({ onBrowseScholarships }) {
       alert('Could not withdraw: ' + err.message);
     } finally {
       setWithdrawing(false);
+    }
+  };
+
+  const handleResumeDraft = async (app) => {
+    setResumeLoading(true);
+    try {
+      const sId = app.scholarship_id || app.scholarship?.scholarship_id || app.scholarship?.id;
+      let schol = null;
+      if (sId) {
+        try {
+          schol = await getScholarshipById(sId);
+        } catch (_) {}
+      }
+      if (!schol) {
+        schol = {
+          id: sId,
+          scholarship_id: sId,
+          title: app.scholarship_title || 'Scholarship Scheme',
+          name: app.scholarship_title || 'Scholarship Scheme',
+          category: app.category || 'Merit',
+          amount: app.award_amount || 50000,
+        };
+      }
+      setResumingScholarship(schol);
+      setResumingDraft(app);
+    } catch (err) {
+      console.warn('Failed to prepare resume draft:', err);
+    } finally {
+      setResumeLoading(false);
+    }
+  };
+
+  const handleDocAction = async (doc, isPreview) => {
+    try {
+      const appId = selectedApp?.raw_id || selectedApp?.id || doc.application_id;
+      const docId = doc.id || doc.application_document_id;
+      const filename = doc.original_filename || doc.name || 'document.pdf';
+      if (!appId || !docId) {
+        alert('Missing application or document reference.');
+        return;
+      }
+      await downloadDocumentFile(appId, docId, filename, isPreview);
+    } catch (err) {
+      alert(`Could not ${isPreview ? 'preview' : 'download'} file: ${err.message}`);
     }
   };
 
@@ -334,8 +387,24 @@ export default function StudentDashboard({ onBrowseScholarships }) {
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                       <span>Grant: <strong style={{ color: '#34D399' }}>₹{(app.award_amount || 0).toLocaleString('en-IN')}</strong></span>
-                      <span>Submitted: {new Date(app.submitted_at || Date.now()).toLocaleDateString()}</span>
+                      <span>{app.status === 'DRAFT' ? 'Saved Draft' : `Submitted: ${new Date(app.submitted_at || Date.now()).toLocaleDateString()}`}</span>
                     </div>
+
+                    {app.status === 'DRAFT' && (
+                      <div style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleResumeDraft(app);
+                          }}
+                          className="btn btn-primary btn-sm"
+                          style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                        >
+                          <Edit3 size={12} /> Resume Application
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -358,6 +427,39 @@ export default function StudentDashboard({ onBrowseScholarships }) {
                 </div>
                 <StatusBadge status={selectedApp.status} size="lg" />
               </div>
+
+              {/* Draft Resume Action Banner */}
+              {selectedApp.status === 'DRAFT' && (
+                <div style={{
+                  background: 'rgba(99, 102, 241, 0.12)',
+                  border: '1px solid rgba(99, 102, 241, 0.35)',
+                  borderRadius: '10px',
+                  padding: '1.25rem',
+                  marginBottom: '1.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  flexWrap: 'wrap',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#C7D2FE', fontSize: '0.95rem', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <Edit3 size={16} /> Draft Application — Editing Active
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#94A3B8', lineHeight: 1.5 }}>
+                      This application is saved as a DRAFT. You can reopen it to update your Statement of Purpose, upload missing required documents, or replace uploaded files before final submission.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleResumeDraft(selectedApp)}
+                    className="btn btn-primary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.6rem 1.25rem', fontWeight: 700, whiteSpace: 'nowrap' }}
+                  >
+                    <Edit3 size={15} /> Resume Application
+                  </button>
+                </div>
+              )}
 
               {/* Progress bar */}
               {progressPct !== null && (
@@ -452,27 +554,53 @@ export default function StudentDashboard({ onBrowseScholarships }) {
                 <h4 style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
                   Attached Documents ({documents.length || selectedApp.documents?.length || 0})
                 </h4>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {(documents.length > 0 ? documents : (selectedApp.documents || [])).map((doc, idx) => {
                     const fileName = doc.original_filename || doc.name || `Document ${idx + 1}`;
                     const isVerified = doc.verification_status === 'VERIFIED' || doc.verified;
+                    const isRejected = doc.verification_status === 'REJECTED';
                     return (
                       <div
                         key={doc.id || doc.application_document_id || idx}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '0.6rem',
-                          padding: '0.6rem 0.85rem',
+                          justifyContent: 'space-between',
+                          gap: '0.75rem',
+                          padding: '0.65rem 0.95rem',
                           background: 'rgba(255, 255, 255, 0.04)',
-                          borderRadius: '6px',
+                          borderRadius: '8px',
                           border: '1px solid var(--border-subtle)',
                         }}
                       >
-                        <FileText size={16} color="#06B6D4" />
-                        <div>
-                          <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500 }}>{fileName}</div>
-                          <div style={{ fontSize: '0.7rem', color: isVerified ? '#34D399' : 'var(--text-muted)' }}>{doc.mime_type || doc.size || ''} · {isVerified ? '✓ Verified' : 'Pending Verification'}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <FileText size={20} color="#06B6D4" />
+                          <div>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', fontWeight: 600 }}>{fileName}</div>
+                            <div style={{ fontSize: '0.72rem', color: isVerified ? '#34D399' : isRejected ? '#F87171' : 'var(--text-muted)' }}>
+                              {doc.mime_type || ''} {doc.file_size_bytes ? `· ${(doc.file_size_bytes / 1024).toFixed(1)} KB` : ''} · {isVerified ? '✓ Verified' : isRejected ? '✕ Rejected' : 'Pending Verification'}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleDocAction(doc, true)}
+                            className="btn btn-secondary btn-sm"
+                            style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                            title="Preview Document in Browser"
+                          >
+                            <Eye size={13} /> View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDocAction(doc, false)}
+                            className="btn btn-secondary btn-sm"
+                            style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                            title="Download Original File"
+                          >
+                            <Download size={13} /> Download
+                          </button>
                         </div>
                       </div>
                     );
@@ -616,6 +744,24 @@ export default function StudentDashboard({ onBrowseScholarships }) {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Resume Draft Application Modal */}
+      {resumingDraft && (
+        <ApplyModal
+          scholarship={resumingScholarship}
+          existingDraft={resumingDraft}
+          user={profile}
+          onClose={() => {
+            setResumingDraft(null);
+            setResumingScholarship(null);
+          }}
+          onSuccess={() => {
+            setResumingDraft(null);
+            setResumingScholarship(null);
+            loadData();
+          }}
+        />
       )}
     </div>
   );

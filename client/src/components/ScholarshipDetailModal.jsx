@@ -12,7 +12,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 
-export default function ScholarshipDetailModal({ scholarship, onClose, onApply }) {
+export default function ScholarshipDetailModal({ scholarship, onClose, onApply, appliedStatus }) {
   if (!scholarship) return null;
 
   const title = scholarship.title || scholarship.name || 'Scholarship Award';
@@ -42,6 +42,19 @@ export default function ScholarshipDetailModal({ scholarship, onClose, onApply }
     month: 'long',
     day: 'numeric',
   });
+
+  let isExpired = false;
+  if (deadline && !isNaN(new Date(deadline).getTime())) {
+    const checkDate = new Date(deadline);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(deadline).trim())) {
+      checkDate.setHours(23, 59, 59, 999);
+    }
+    isExpired = checkDate.getTime() < Date.now();
+  }
+
+  const sStatus = String(scholarship.status || '').toLowerCase();
+  const isPaused = sStatus === 'paused';
+  const isClosed = isExpired || sStatus === 'closed';
 
   return (
     <div
@@ -189,7 +202,7 @@ export default function ScholarshipDetailModal({ scholarship, onClose, onApply }
         </div>
 
         {/* Required Documents Checklist */}
-        <div style={{ marginBottom: '2rem' }}>
+        <div style={{ marginBottom: '1.5rem' }}>
           <h4 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '0.75rem' }}>Mandatory Verification Documents</h4>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
             {(required_documents || ['Grade Sheet', 'Income Proof', 'Government ID', 'SOP']).map((doc, idx) => (
@@ -214,20 +227,76 @@ export default function ScholarshipDetailModal({ scholarship, onClose, onApply }
           </div>
         </div>
 
+        {/* Status Warning Banners */}
+        {isPaused && (
+          <div style={{
+            background: '#FEF3C7',
+            border: '1px solid #FDE68A',
+            color: '#92400E',
+            padding: '0.85rem 1rem',
+            borderRadius: '8px',
+            marginBottom: '1.25rem',
+            fontSize: '0.875rem',
+            fontWeight: 600,
+          }}>
+            ⏸ This scholarship is currently paused by administrators. Applications cannot be accepted at this time.
+          </div>
+        )}
+        {isClosed && (
+          <div style={{
+            background: '#FEE2E2',
+            border: '1px solid #FCA5A5',
+            color: '#991B1B',
+            padding: '0.85rem 1rem',
+            borderRadius: '8px',
+            marginBottom: '1.25rem',
+            fontSize: '0.875rem',
+            fontWeight: 600,
+          }}>
+            ⛔ Application Deadline Passed — Submissions are closed for this scholarship award.
+          </div>
+        )}
+
         {/* Action Buttons */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '1.25rem' }}>
           <button onClick={onClose} className="btn btn-secondary">
             Close
           </button>
-          <button
-            onClick={() => {
-              onClose();
-              onApply(scholarship);
-            }}
-            className="btn btn-primary"
-          >
-            Apply for this Award <ArrowRight size={16} />
-          </button>
+          {appliedStatus ? (
+            <button
+              disabled
+              className="btn btn-secondary"
+              style={{ opacity: 0.75, cursor: 'not-allowed' }}
+            >
+              Already Applied ({appliedStatus})
+            </button>
+          ) : isPaused ? (
+            <button
+              disabled
+              className="btn btn-secondary"
+              style={{ opacity: 0.9, cursor: 'not-allowed', background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', fontWeight: 600 }}
+            >
+              Temporarily Paused
+            </button>
+          ) : isClosed ? (
+            <button
+              disabled
+              className="btn btn-secondary"
+              style={{ opacity: 0.9, cursor: 'not-allowed', background: '#FEE2E2', color: '#991B1B', border: '1px solid #FCA5A5', fontWeight: 600 }}
+            >
+              Application Closed
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                onClose();
+                onApply(scholarship);
+              }}
+              className="btn btn-primary"
+            >
+              Apply for this Award <ArrowRight size={16} />
+            </button>
+          )}
         </div>
       </div>
     </div>

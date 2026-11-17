@@ -39,7 +39,9 @@ async function list(req, res, next) {
     const data = await service.list(req.query);
     const etag = `"${makeEtag(data)}"`;
     res.setHeader('ETag', etag);
-    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     if (req.headers['if-none-match'] === etag) return res.status(304).end();
     if (req.headers.accept && req.headers.accept.includes('application/xml')) {
       res.setHeader('Content-Type', 'application/xml');
@@ -55,7 +57,9 @@ async function getOne(req, res, next) {
     if (!item) return res.status(404).json({ success: false, message: 'Scholarship not found' });
     const etag = `"${makeEtag(item)}"`;
     res.setHeader('ETag', etag);
-    res.setHeader('Cache-Control', 'public, max-age=60');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     if (req.headers['if-none-match'] === etag) return res.status(304).end();
     if (req.headers.accept && req.headers.accept.includes('application/xml')) {
       res.setHeader('Content-Type', 'application/xml');
@@ -68,7 +72,14 @@ async function getOne(req, res, next) {
 async function create(req, res, next) {
   try {
     const errors = validateScholarship(req.body);
-    if (errors.length) return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    if (errors.length) {
+      return res.status(400).json({
+        success: false,
+        message: `Validation failed: ${errors.join(', ')}`,
+        errors,
+        error: errors.join(', '),
+      });
+    }
     const item = await service.create(req.body);
     res.status(201).json({ success: true, message: 'Scholarship created', data: item });
   } catch (error) { next(error); }
@@ -77,7 +88,14 @@ async function create(req, res, next) {
 async function update(req, res, next) {
   try {
     const errors = validateScholarship(req.body, true);
-    if (errors.length) return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    if (errors.length) {
+      return res.status(400).json({
+        success: false,
+        message: `Validation failed: ${errors.join(', ')}`,
+        errors,
+        error: errors.join(', '),
+      });
+    }
     const item = await service.update(req.params.id, req.body);
     if (!item) return res.status(404).json({ success: false, message: 'Scholarship not found' });
     res.json({ success: true, message: 'Scholarship updated', data: item });
@@ -86,25 +104,33 @@ async function update(req, res, next) {
 
 async function changeStatus(req, res, next) {
   try {
-    // DB accepts: draft, published, closed, archived (open/active map to published)
+    // DB accepts: draft, published, paused, closed, archived (open/active map to published)
     const rawStatus = (req.body.status || '').toLowerCase();
     const statusMap = { open: 'published', active: 'published' };
     const mappedStatus = statusMap[rawStatus] || rawStatus;
-    const allowed = ['draft', 'published', 'closed', 'archived', 'open', 'active'];
+    const allowed = ['draft', 'published', 'paused', 'closed', 'archived', 'open', 'active'];
     if (!allowed.includes(rawStatus)) {
       return res.status(400).json({ success: false, message: `status must be one of: ${allowed.join(', ')}` });
     }
-    const item = await service.updateStatus(req.params.id, mappedStatus);
+    const item = await service.updateStatus(req.params.id, mappedStatus, req.user, req.body.remarks);
     if (!item) return res.status(404).json({ success: false, message: 'Scholarship not found' });
-    res.json({ success: true, message: 'Scholarship status updated', data: item });
-  } catch (error) { next(error); }
+    res.json({ success: true, message: `Scholarship status updated to ${mappedStatus}`, data: item });
+  } catch (error) {
+    if (error.statusCode === 400) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    next(error);
+  }
 }
 
 async function remove(req, res, next) {
   try {
-    const deleted = await service.remove(req.params.id);
-    if (!deleted) return res.status(404).json({ success: false, message: 'Scholarship not found' });
-    res.json({ success: true, message: 'Scholarship deleted' });
+    const result = await service.remove(req.params.id);
+    if (!result) return res.status(404).json({ success: false, message: 'Scholarship not found' });
+    if (result.archived) {
+      return res.json({ success: true, archived: true, message: result.message, data: { status: 'archived' } });
+    }
+    res.json({ success: true, message: 'Scholarship deleted successfully' });
   } catch (error) { next(error); }
 }
 

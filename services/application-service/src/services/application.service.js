@@ -35,6 +35,28 @@ class ApplicationService {
     // 2. Prevent Duplicate Application
     const existing = await ApplicationRepository.findExisting(studentId, payload.scholarship_id);
     if (existing) {
+      if (initialStatus === STATUSES.DRAFT && existing.status === STATUSES.DRAFT) {
+        let currentDraft = existing;
+        if (payload.sop || payload.statement) {
+          const updatedDraft = await ApplicationRepository.update(existing.application_id, {
+            sop: payload.sop || payload.statement,
+            statement: payload.statement || payload.sop,
+          });
+          if (updatedDraft) currentDraft = updatedDraft;
+        }
+        return {
+          fromCache: false,
+          status: 200,
+          body: {
+            application: currentDraft,
+            scholarship: {
+              scholarship_id: payload.scholarship_id,
+              name: currentDraft.metadata?.scholarship_name || 'Scholarship Scheme',
+            },
+            status: currentDraft.status,
+          },
+        };
+      }
       const err = new Error('You have already created or submitted an application for this scholarship program.');
       err.statusCode = 409;
       err.errorCode = 'DUPLICATE_APPLICATION';
@@ -144,12 +166,18 @@ class ApplicationService {
 
     // 5. If SUBMITTED, notify Review Service Event (Async non-blocking)
     if (initialStatus === STATUSES.SUBMITTED) {
+      const appDocs = await DocumentRepository.findByApplicationId(application.application_id).catch(() => []);
       ReviewClient.notifyApplicationSubmitted({
         applicationId: application.application_id,
         applicationNumber: application.application_number,
         studentId,
         scholarshipId: payload.scholarship_id,
         submittedAt: application.submitted_at,
+        documents: appDocs.map((d) => ({
+          documentId: d.id,
+          name: d.document_type || d.original_filename,
+          status: d.verification_status || 'PENDING',
+        })),
       }).catch(() => {});
     }
 
@@ -216,6 +244,45 @@ class ApplicationService {
       throw err;
     }
 
+    // Verify Scholarship Deadline and Availability before finalizing draft submission
+    await EligibilityService.verifyScholarshipAndEligibility(application.scholarship_id);
+
+    // Independent Backend Verification of all Mandatory Document Requirements
+    const requirements = await RequirementRepository.getByApplicationId(application.application_id);
+    const mandatoryReqs = requirements.filter((r) => r.is_mandatory !== false);
+
+    if (mandatoryReqs.length > 0) {
+      const activeDocs = await DocumentRepository.findByApplicationId(application.application_id);
+      const missingRequirements = [];
+
+      for (const req of mandatoryReqs) {
+        const hasDoc = activeDocs.some((d) => {
+          if (!d.is_current) return false;
+          if (d.requirement_id && String(d.requirement_id) === String(req.id)) {
+            return true;
+          }
+          const docType = String(d.document_type || d.original_filename || '').toLowerCase().replace(/[\s_-]+/g, '');
+          const reqName = String(req.requirement_name || req.requirement_code || '').toLowerCase().replace(/[\s_-]+/g, '');
+          const reqCode = String(req.requirement_code || '').toLowerCase().replace(/[\s_-]+/g, '');
+          return docType.includes(reqName) || reqName.includes(docType) || (reqCode && docType.includes(reqCode));
+        });
+
+        if (!hasDoc) {
+          missingRequirements.push(req.requirement_name || req.requirement_code || 'Required Document');
+        }
+      }
+
+      if (missingRequirements.length > 0) {
+        const err = new Error(
+          `Cannot submit application: Mandatory documents are missing: ${missingRequirements.join(', ')}`
+        );
+        err.statusCode = 400;
+        err.errorCode = 'MISSING_REQUIRED_DOCUMENTS';
+        err.details = { missing_requirements: missingRequirements };
+        throw err;
+      }
+    }
+
     // Transition DRAFT -> SUBMITTED
     const updated = await this.updateStatus(
       application.application_id,
@@ -225,12 +292,18 @@ class ApplicationService {
     );
 
     // Notify Review Service
+    const appDocs = await DocumentRepository.findByApplicationId(application.application_id).catch(() => []);
     ReviewClient.notifyApplicationSubmitted({
       applicationId: application.application_id,
       applicationNumber: application.application_number,
       studentId: application.student_id,
       scholarshipId: application.scholarship_id,
       submittedAt: new Date(),
+      documents: appDocs.map((d) => ({
+        documentId: d.id,
+        name: d.document_type || d.original_filename,
+        status: d.verification_status || 'PENDING',
+      })),
     }).catch(() => {});
 
     return updated;

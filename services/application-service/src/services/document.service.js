@@ -167,6 +167,15 @@ class DocumentService {
       throw err;
     }
 
+    const editableStatuses = ['DRAFT', 'CORRECTION_REQUIRED', 'DOCUMENTS_REQUIRED', 'RESUBMISSION_REQUIRED'];
+    if (user.role === 'student' && (!application || !editableStatuses.includes(application.status))) {
+      if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      const err = new Error(`Documents cannot be modified after final submission. Application is currently in '${application?.status}' status.`);
+      err.statusCode = 403;
+      err.errorCode = 'DOCUMENT_MODIFICATION_LOCKED';
+      throw err;
+    }
+
     const storageResult = await StorageService.saveFile(
       file.path,
       file.originalname,
@@ -310,6 +319,14 @@ class DocumentService {
       const err = new Error('Access denied.');
       err.statusCode = 403;
       err.errorCode = 'ACCESS_DENIED';
+      throw err;
+    }
+
+    const editableStatuses = ['DRAFT', 'CORRECTION_REQUIRED', 'DOCUMENTS_REQUIRED', 'RESUBMISSION_REQUIRED'];
+    if (user.role === 'student' && (!application || !editableStatuses.includes(application.status))) {
+      const err = new Error(`Documents cannot be modified after final submission. Application is currently in '${application?.status}' status.`);
+      err.statusCode = 403;
+      err.errorCode = 'DOCUMENT_MODIFICATION_LOCKED';
       throw err;
     }
 

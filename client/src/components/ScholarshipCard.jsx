@@ -15,6 +15,7 @@ export default function ScholarshipCard({
   onSelect,
   onApply,
   userProfile,
+  appliedStatus,
 }) {
   const sTitle = scholarship.title || scholarship.name || 'Scholarship Award';
   const sCategory = scholarship.category || scholarship.eligible_category || 'Merit';
@@ -32,7 +33,7 @@ export default function ScholarshipCard({
       }).format(sAmount) + ' / year'
     : 'Various benefits';
 
-  // Format deadline date
+  // Format deadline date and check expiry
   const deadlineDate = scholarship.deadline ? new Date(scholarship.deadline) : null;
   const formattedDeadline = deadlineDate && !isNaN(deadlineDate.getTime())
     ? deadlineDate.toLocaleDateString('en-GB', {
@@ -41,6 +42,19 @@ export default function ScholarshipCard({
         year: 'numeric',
       })
     : 'Not specified';
+
+  let isExpired = false;
+  if (deadlineDate && !isNaN(deadlineDate.getTime())) {
+    const checkDate = new Date(deadlineDate);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(scholarship.deadline).trim())) {
+      checkDate.setHours(23, 59, 59, 999);
+    }
+    isExpired = checkDate.getTime() < Date.now();
+  }
+
+  const sStatus = String(scholarship.status || '').toLowerCase();
+  const isPaused = sStatus === 'paused';
+  const isClosed = isExpired || sStatus === 'closed';
 
   // Check eligibility if user has academic info
   let isEligible = true;
@@ -95,7 +109,7 @@ export default function ScholarshipCard({
     >
       <div>
         {/* Top Provider Tag (Mint badge as in screenshot) */}
-        <div style={{ marginBottom: '1rem' }}>
+        <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{
             display: 'inline-block',
             fontSize: '0.74rem',
@@ -108,6 +122,34 @@ export default function ScholarshipCard({
           }}>
             {sCategory ? `${sCategory} scheme` : 'Independent provider'}
           </span>
+          {isPaused && (
+            <span style={{
+              display: 'inline-block',
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              padding: '0.22rem 0.65rem',
+              borderRadius: '6px',
+              background: '#FEF3C7',
+              color: '#92400E',
+              border: '1px solid #FDE68A',
+            }}>
+              Paused
+            </span>
+          )}
+          {isClosed && (
+            <span style={{
+              display: 'inline-block',
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              padding: '0.22rem 0.65rem',
+              borderRadius: '6px',
+              background: '#FEE2E2',
+              color: '#991B1B',
+              border: '1px solid #FCA5A5',
+            }}>
+              Application Closed
+            </span>
+          )}
         </div>
 
         {/* 2-Column Details: Grant & Deadline (Exactly as in screenshot) */}
@@ -256,18 +298,76 @@ export default function ScholarshipCard({
         </div>
 
         {/* Apply Button */}
-        <button
-          onClick={() => onApply(scholarship)}
-          className="btn btn-primary btn-sm"
-          style={{
-            fontSize: '0.84rem',
-            padding: '0.45rem 0.95rem',
-            borderRadius: '6px',
-            flexShrink: 0,
-          }}
-        >
-          Apply Now
-        </button>
+        {appliedStatus ? (
+          <button
+            disabled
+            className="btn btn-secondary btn-sm"
+            style={{
+              fontSize: '0.8rem',
+              padding: '0.45rem 0.85rem',
+              borderRadius: '6px',
+              flexShrink: 0,
+              opacity: 0.75,
+              cursor: 'not-allowed',
+              background: '#F1F5F9',
+              color: '#64748B',
+              border: '1px solid #CBD5E1',
+            }}
+          >
+            Already Applied ({appliedStatus})
+          </button>
+        ) : isPaused ? (
+          <button
+            disabled
+            className="btn btn-secondary btn-sm"
+            style={{
+              fontSize: '0.8rem',
+              padding: '0.45rem 0.85rem',
+              borderRadius: '6px',
+              flexShrink: 0,
+              opacity: 0.95,
+              cursor: 'not-allowed',
+              background: '#FEF3C7',
+              color: '#92400E',
+              border: '1px solid #FDE68A',
+              fontWeight: 600,
+            }}
+          >
+            Temporarily Paused
+          </button>
+        ) : isClosed ? (
+          <button
+            disabled
+            className="btn btn-secondary btn-sm"
+            style={{
+              fontSize: '0.8rem',
+              padding: '0.45rem 0.85rem',
+              borderRadius: '6px',
+              flexShrink: 0,
+              opacity: 0.95,
+              cursor: 'not-allowed',
+              background: '#FEE2E2',
+              color: '#991B1B',
+              border: '1px solid #FCA5A5',
+              fontWeight: 600,
+            }}
+          >
+            Application Closed
+          </button>
+        ) : (
+          <button
+            onClick={() => onApply(scholarship)}
+            className="btn btn-primary btn-sm"
+            style={{
+              fontSize: '0.84rem',
+              padding: '0.45rem 0.95rem',
+              borderRadius: '6px',
+              flexShrink: 0,
+            }}
+          >
+            Apply Now
+          </button>
+        )}
       </div>
     </div>
   );

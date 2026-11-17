@@ -4,9 +4,9 @@ const ApiResponse = require('../utils/api-response');
 
 class DocumentController {
   /**
-   * Helper: check application ownership for document actions
+   * Helper: check application ownership and permissions for document actions
    */
-  static async _checkAccess(applicationId, user) {
+  static async _checkAccess(applicationId, user, forModification = false) {
     const application = await ApplicationRepository.findById(applicationId);
     if (!application) {
       const err = new Error(`Application #${applicationId} was not found.`);
@@ -20,6 +20,21 @@ class DocumentController {
       err.errorCode = 'ACCESS_DENIED';
       throw err;
     }
+    if (forModification) {
+      if (user.role !== 'student') {
+        const err = new Error('Reviewers and Admins have read-only access to applicant documents.');
+        err.statusCode = 403;
+        err.errorCode = 'DOCUMENT_MODIFICATION_FORBIDDEN';
+        throw err;
+      }
+      const editableStatuses = ['DRAFT', 'CORRECTION_REQUIRED', 'DOCUMENTS_REQUIRED', 'RESUBMISSION_REQUIRED'];
+      if (!editableStatuses.includes(application.status)) {
+        const err = new Error(`Documents cannot be modified after final submission. Application is currently in '${application.status}' status.`);
+        err.statusCode = 403;
+        err.errorCode = 'DOCUMENT_MODIFICATION_LOCKED';
+        throw err;
+      }
+    }
     return application;
   }
 
@@ -28,7 +43,7 @@ class DocumentController {
    */
   static async uploadDocument(req, res, next) {
     try {
-      const application = await DocumentController._checkAccess(req.params.id, req.user);
+      const application = await DocumentController._checkAccess(req.params.id, req.user, true);
       const document = await DocumentService.uploadDocument(application, req.file, req.body, req.user);
       return ApiResponse.created(res, 'Document uploaded successfully', { document });
     } catch (err) {
@@ -41,7 +56,7 @@ class DocumentController {
    */
   static async replaceDocument(req, res, next) {
     try {
-      await DocumentController._checkAccess(req.params.id, req.user);
+      await DocumentController._checkAccess(req.params.id, req.user, true);
       const document = await DocumentService.replaceDocument(req.params.documentId, req.file, req.body, req.user);
       return ApiResponse.success(res, 'Document replaced successfully', { document });
     } catch (err) {
@@ -123,7 +138,7 @@ class DocumentController {
    */
   static async deleteDocument(req, res, next) {
     try {
-      await DocumentController._checkAccess(req.params.id, req.user);
+      await DocumentController._checkAccess(req.params.id, req.user, true);
       const result = await DocumentService.deleteDocument(req.params.documentId, req.user);
       return ApiResponse.success(res, result.message || 'Document deleted successfully');
     } catch (err) {

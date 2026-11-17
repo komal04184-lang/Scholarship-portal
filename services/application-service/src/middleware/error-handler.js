@@ -41,12 +41,19 @@ function errorHandler(err, req, res, next) {
 
   // PostgreSQL duplicate key constraint violation
   if (err.code === '23505') {
+    if (err.constraint === 'unique_student_scholarship' || (err.message && err.message.includes('unique_student_scholarship'))) {
+      return ApiResponse.conflict(
+        res,
+        'You have already created or submitted an application for this scholarship program.',
+        'DUPLICATE_APPLICATION'
+      );
+    }
     return ApiResponse.conflict(res, 'Duplicate resource entry exists.', 'DUPLICATE_ENTRY');
   }
 
   // Custom Business Error
   if (err.statusCode) {
-    return ApiResponse.error(res, err.message, err.errorCode || 'ERROR', err.statusCode);
+    return ApiResponse.error(res, err.message, err.errorCode || 'ERROR', err.statusCode, err.details || null);
   }
 
   // Generic Internal Server Error
