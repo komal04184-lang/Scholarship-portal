@@ -3,6 +3,8 @@ const StatusRepository = require('../repositories/status.repository');
 const AuditRepository = require('../repositories/audit.repository');
 const RequirementRepository = require('../repositories/requirement.repository');
 const ApiResponse = require('../utils/api-response');
+const { triggerScholarshipDisbursement } = require('../services/paymentClient');
+
 
 class ApplicationController {
   /**
@@ -190,6 +192,20 @@ class ApplicationController {
    */
   static async updateStatus(req, res, next) {
     try {
+      if (req.body.status === 'APPROVED' && updated) {
+        try {
+          await triggerScholarshipDisbursement({
+            applicationId: String(updated.id),
+            studentId: String(updated.student_id || updated.studentId),
+            scholarshipId: String(updated.scholarship_id || updated.scholarshipId),
+            amount: updated.approved_amount || updated.amount || 10000,
+            installmentNo: 1
+          });
+        } catch (err) {
+          console.error('[Application Service] Disbursement trigger failed:', err.response?.data || err.message);
+        }
+      }
+
       const { status, comment, remarks } = req.body;
       const result = await ApplicationService.updateStatus(
         req.params.id,
